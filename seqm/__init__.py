@@ -1,3 +1,3 @@
-from .models import *
-from .bt import *
+from . import models
+from . import bt
 from . import bt3
