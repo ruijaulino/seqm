@@ -1,0 +1,3 @@
+STRATEGY_COLUMN = 'strategy'
+WEIGHT_PREFIX_COLUMNS = 'weight_'
+PORTFOLIO_WEIGHT_COLUMN = 'portfolio_weight'

@@ -7,9 +7,10 @@ import copy
 
 try:
 	from .normalize import Normalizer,DummyNormalizer
+	from .constants import *
 except ImportError:
 	from normalize import Normalizer,DummyNormalizer
-
+	from constants import *
 # base class that contains a data element in numpy array form
 # models can be applied to it
 
@@ -35,13 +36,13 @@ class Element:
 		self._fit_transform()
 
 	def get_s(self):
-		return pd.DataFrame(self.s,columns=['s'],index=self.ts)
+		return pd.DataFrame(self.s,columns=[STRATEGY_COLUMN],index=self.ts)
 
 	def get_w(self):
-		return pd.DataFrame(self.w,columns=[c+"_w" for c in self.y_cols],index=self.ts)
+		return pd.DataFrame(self.w,columns=[WEIGHT_PREFIX_COLUMNS+c for c in self.y_cols],index=self.ts)
 
 	def get_pw(self):
-		return pd.DataFrame(self.pw,columns=['pw'],index=self.ts)
+		return pd.DataFrame(self.pw,columns=[PORTFOLIO_WEIGHT_COLUMN],index=self.ts)
 
 	def view(self):
 		print('** Element **')
@@ -317,5 +318,5 @@ class Path:
 		for key in self.keys:			
 			self.results.update({key:pd.concat([self.s.get(key),self.w.get(key),self.pw.get(key)],axis=1)})
 		if len(self.keys)==1:
-			self.results=self.results.get(self.names[0])
+			self.results=self.results.get(self.keys[0])
 		return self.results
