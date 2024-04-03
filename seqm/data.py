@@ -78,12 +78,14 @@ class Element:
 		self.x_train = self.x_normalizer.transform(self.x_train)
 		self.y_normalizer.fit(self.y_train)
 		self.y_train = self.y_normalizer.transform(self.y_train)
+		# can transform now the test x
+		self.x_test = self.x_normalizer.transform(self.x_test)
 
 	def estimate(self, model, estimate_params=None):
 		"""Train the model using the training data contained within this DataElement."""
 		estimate_params = estimate_params or {}
 		self.model=copy.deepcopy(model)  		
-		self.model.train(x=self.x_train, y=self.y_train, **estimate_params)
+		self.model.estimate(x=self.x_train, y=self.y_train, **estimate_params)
 
 	def evaluate(self):
 		"""Evaluate the model using the test data and return performance metrics."""
@@ -98,6 +100,7 @@ class Element:
 		for i in range(n):
 			# normalize y for input (make copy of y)
 			y_normalized = self.y_normalizer.transform(np.array(self.y_test[:i]))
+			# the x input is already normalized!
 			w = self.model.get_weight(**{'y': y_normalized, 'x': self.x_test[:i], 'xq': self.x_test[i]})
 			self.w[i] = w
 			self.s[i] = np.dot(self.y_test[i], w)
@@ -129,12 +132,14 @@ class Elements:
 	def __iter__(self):
 		return iter(self.element)
 
-	def estimate(self,model,single_model=False):
+	def estimate(self,model,single_model=False,view_models=False):
 		if single_model:
 			model=copy.deepcopy(model)
 			x=np.vstack([e.x_train for e in self])
 			y=np.vstack([e.y_train for e in self])
 			model.estimate(**{'x':x,'y':y})
+			if view_models:
+				model.view(False)
 			# set same model for all element
 			for e in self: e.set_model(model)
 		else:

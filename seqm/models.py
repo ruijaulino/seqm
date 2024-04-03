@@ -357,7 +357,10 @@ class StateGaussian(object):
 			return self.default_w*np.ones(self.p)
 		else:
 			return g.get_weight(normalize=False)/self.max_w_norm
-		
+
+
+
+
 class ConditionalGaussian(object):
 	def __init__(self,n_gibbs=None,f_burn=0.1,min_k=0.25,max_k=0.25,kelly_std=2,max_w=1):
 		self.n_gibbs=n_gibbs
@@ -444,6 +447,99 @@ class ConditionalGaussian(object):
 
 
 
+class IndividualConditionalGaussian(object):
+	def __init__(self,n_gibbs=None,f_burn=0.1,min_k=0.25,max_k=0.25,kelly_std=2,max_w=1):
+		self.n_gibbs=n_gibbs
+		self.no_gibbs=False
+		if self.n_gibbs is None:
+			self.no_gibbs=True
+		self.f_burn=f_burn
+		self.min_k=min_k
+		self.max_k=max_k
+		self.kelly_std=kelly_std
+		self.max_w=max_w
+		self.p=0
+		self.q=0
+		self.cond_gaussians=[]
+	
+	def view(self,plot_hist=True):
+		if self.g is not None:
+			self.g.view(plot_hist=plot_hist)
+	
+	def estimate(self,y,x,**kwargs): 
+		x=x.copy()
+		y=y.copy()		
+		if x.ndim==1:
+			x=x[:,None]
+		if y.ndim==1:
+			y=y[:,None]		
+		self.p=y.shape[1]
+		self.q=x.shape[1]		
+		for i in range(self.q):
+			tmp=ConditionalGaussian(n_gibbs=self.n_gibbs,f_burn=self.f_burn,min_k=self.min_k,max_k=self.max_k,kelly_std=self.kelly_std,max_w=self.max_w)
+			tmp.estimate(y=y,x=x[:,[i]])
+			self.cond_gaussians.append(tmp)
+
+	
+	def get_weight(self,xq,normalize=True,**kwargs):
+		
+		w=np.zeros((self.q,self.p))
+		for i in range(self.q):
+			w[i]=self.cond_gaussians[i].get_weight(xq[[i]],normalize)
+		w=np.mean(w,axis=0)
+		return w
+
+
+class SameConditionalGaussian(object):
+	def __init__(self,n_gibbs=None,f_burn=0.1,min_k=0.25,max_k=0.25,kelly_std=2,max_w=1):
+		self.n_gibbs=n_gibbs
+		self.no_gibbs=False
+		if self.n_gibbs is None:
+			self.no_gibbs=True
+		self.f_burn=f_burn
+		self.min_k=min_k
+		self.max_k=max_k
+		self.kelly_std=kelly_std
+		self.max_w=max_w
+		self.p=0
+		self.q=0
+		self.cond_gaussian=None
+	
+	def view(self,plot_hist=True):
+		if self.g is not None:
+			self.g.view(plot_hist=plot_hist)
+	
+	def estimate(self,y,x,**kwargs): 
+		# all features are the same feature or at least behave in the same way
+		# train model with all data
+		# predict individually
+		x=x.copy()
+		y=y.copy()		
+		if x.ndim==1:
+			x=x[:,None]
+		if y.ndim==1:
+			y=y[:,None]		
+		
+		self.p=y.shape[1]
+		self.q=x.shape[1]	
+
+		x_all=[]
+		y_all=[]
+
+		for i in range(self.q):
+			x_all.append(x[:,[i]])
+			y_all.append(y)
+		x_all=np.vstack(x_all)
+		y_all=np.vstack(y_all)
+		self.cond_gaussian=ConditionalGaussian(n_gibbs=self.n_gibbs,f_burn=self.f_burn,min_k=self.min_k,max_k=self.max_k,kelly_std=self.kelly_std,max_w=self.max_w)
+		self.cond_gaussian.estimate(y=y_all,x=x_all)
+
+	def get_weight(self,xq,normalize=True,**kwargs):		
+		w=np.zeros((self.q,self.p))
+		for i in range(self.q):
+			w[i]=self.cond_gaussian.get_weight(xq[[i]],normalize)
+		w=np.mean(w,axis=0)
+		return w
 
 
 
@@ -858,7 +954,7 @@ class GaussianMixture(object):
 			samples[i]=np.random.multivariate_normal(self.states_mean[zi],self.states_cov[zi])		
 		return samples
 
-		
+
 class ConditionalGaussianMixture(object):
 	def __init__(self,n_states,n_gibbs=1000,f_burn=0.1,min_k=0.25,max_k=0.25,kelly_std=2,max_w=1):
 		self.n_states=n_states
@@ -983,6 +1079,61 @@ class ConditionalGaussianMixture(object):
 		x=samples[:,x_idx]
 		y=samples[:,y_idx]
 		return y,x
+
+# ConditionalGaussianMixture(n_states,n_gibbs=1000,f_burn=0.1,min_k=0.25,max_k=0.25,kelly_std=2,max_w=1)
+class SameConditionalGaussianMixture(object):
+	def __init__(self,n_states,n_gibbs=1000,f_burn=0.1,min_k=0.25,max_k=0.25,kelly_std=2,max_w=1):
+		self.n_states=n_states
+		self.n_gibbs=n_gibbs
+		self.f_burn=f_burn
+		self.min_k=min_k
+		self.max_k=max_k
+		self.kelly_std=kelly_std
+		self.max_w=max_w
+		self.p=0
+		self.q=0
+		self.cond_gaussian_mixture=None
+	
+	def view(self,plot_hist=True):
+		if self.g is not None:
+			self.g.view(plot_hist=plot_hist)
+	
+	def estimate(self,y,x,**kwargs): 
+		# all features are the same feature or at least behave in the same way
+		# train model with all data
+		# predict individually
+		x=x.copy()
+		y=y.copy()		
+		if x.ndim==1:
+			x=x[:,None]
+		if y.ndim==1:
+			y=y[:,None]		
+		
+		self.p=y.shape[1]
+		self.q=x.shape[1]	
+
+		x_all=[]
+		y_all=[]
+
+		for i in range(self.q):
+			x_all.append(x[:,[i]])
+			y_all.append(y)
+		x_all=np.vstack(x_all)
+		y_all=np.vstack(y_all)
+		self.cond_gaussian_mixture=ConditionalGaussianMixture(self.n_states,n_gibbs=self.n_gibbs,f_burn=self.f_burn,min_k=self.min_k,max_k=self.max_k,kelly_std=self.kelly_std,max_w=self.max_w)
+		self.cond_gaussian_mixture.estimate(y=y_all,x=x_all)
+
+	def get_weight(self,xq,normalize=True,**kwargs):		
+		w=np.zeros((self.q,self.p))
+		for i in range(self.q):
+			w[i]=self.cond_gaussian_mixture.get_weight(xq[[i]],normalize)
+		w=np.mean(w,axis=0)
+		return w
+
+
+
+
+
 
 # n_states,n_gibbs=1000,f_burn=0.1,max_k=0.25,kelly_std=2,max_w=1
 class StateConditionalGaussianMixture(object):
