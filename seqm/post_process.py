@@ -229,7 +229,7 @@ def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fee
 
 if __name__=='__main__':
 	paths=load_file('paths_dev.pkl')
-	portfolio_post_process(paths,pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,view_weights=True,use_pw=False)
+	portfolio_post_process(paths,pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,view_weights=True,use_pw=True)
 	# post_process(paths=paths,pct_fee=0,seq_fees=False,sr_mult=1,n_boot=1000,key=None)
 	
 

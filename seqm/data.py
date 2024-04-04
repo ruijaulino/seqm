@@ -22,8 +22,8 @@ class Element:
 			x_test: np.ndarray, 
 			y_test: np.ndarray, 
 			ts=None, 
-			x_transform_class: BaseTransform = None, 
-			y_transform_class: BaseTransform = None, 
+			x_transform: BaseTransform = None, 
+			y_transform: BaseTransform = None, 
 			key: str = '', 
 			x_cols = None, 
 			y_cols = None
@@ -38,12 +38,10 @@ class Element:
 		assert self.x_test.shape[1] == self.x_train.shape[1], "x_train and x_test must have the same number of variables"
 		assert self.y_test.shape[1] == self.y_train.shape[1], "y_train and y_test must have the same number of variables"		
 
-		self.x_transform_class = x_transform_class if x_transform_class is not None else IdleTransform  # Store the class, not an instance
-		self.y_transform_class = y_transform_class if y_transform_class is not None else IdleTransform  # Store the class, not an instance
+		self.x_transform = x_transform if x_transform is not None else IdleTransform()  # Store the class, not an instance
+		self.y_transform = y_transform if y_transform is not None else IdleTransform()  # Store the class, not an instance
 
 		self.model = None  # Placeholder for a trained model
-		# fit transform at instantiation
-		self.x_transformer,self.y_transformer=None,None		
 		self.s,self.w,self.pw=None,None,None
 		
 		self._verify_input_data()
@@ -86,15 +84,15 @@ class Element:
 
 	def _fit_transform(self):
 		"""Fit and transform the training data using dedicated normalizers."""
-		self.x_transformer = self.x_transform_class()
-		self.y_transformer = self.y_transform_class()
+		self.x_transform = copy.deepcopy(self.x_transform)
+		self.y_transform = copy.deepcopy(self.y_transform)
 
-		self.x_transformer.fit(self.x_train)
-		self.x_train = self.x_transformer.transform(self.x_train)
-		self.y_transformer.fit(self.y_train)
-		self.y_train = self.y_transformer.transform(self.y_train)
+		self.x_transform.fit(self.x_train)
+		self.x_train = self.x_transform.transform(self.x_train)
+		self.y_transform.fit(self.y_train)
+		self.y_train = self.y_transform.transform(self.y_train)
 		# can transform now the test x
-		self.x_test = self.x_transformer.transform(self.x_test)
+		self.x_test = self.x_transform.transform(self.x_test)
 
 	def estimate(self, model, **kwargs):
 		"""Train the model using the training data contained within this DataElement."""
@@ -104,21 +102,26 @@ class Element:
 	def evaluate(self):
 		"""Evaluate the model using the test data and return performance metrics."""
 		if self.model is None:
-			raise Exception("Model has not been trained.")		
+			raise Exception("Model has not been estimated.")		
 		n = self.y_test.shape[0]
 		p = self.y_test.shape[1]
 		self.s = np.zeros(n, dtype=np.float64)
 		self.w = np.zeros((n, p), dtype=np.float64)
-		self.pw = self.y_transformer.p_scale*np.ones(n, dtype=np.float64)
+		self.pw = np.ones(n, dtype=np.float64)
+		# self.pw = self.y_transform.p_scale*np.ones(n, dtype=np.float64)
 		
 		for i in range(n):
 			# normalize y for input (make copy of y)
-			y_hat = self.y_transformer.transform(np.array(self.y_test[:i]))
+			# make sure this array does not get modified
+			y_test_copy = np.array(self.y_test[:i])
+			y_hat = self.y_transform.transform(y_test_copy)
 			# the x input is already normalized!
 			w = self.model.get_weight(**{'y': y_hat, 'x': self.x_test[:i], 'xq': self.x_test[i]})
 			self.w[i] = w
 			self.s[i] = np.dot(self.y_test[i], w)
+			self.pw[i] = self.y_transform.pw(y_test_copy)
 
+# collection of Elements
 class Elements:
 	def __init__(self):
 		self.element=[]
@@ -169,8 +172,8 @@ class Dataset:
 
 	def __init__(self, 
 				datasets: Union[pd.DataFrame, Dict[str,pd.DataFrame]],  
-				x_transform_class: BaseTransform = None, 
-				y_transform_class: BaseTransform = None,
+				x_transform: BaseTransform = None, 
+				y_transform: BaseTransform = None,
 				target_prefix='y', 
 				feature_prefix='x'
 				):
@@ -178,8 +181,8 @@ class Dataset:
 		self.target_prefix = target_prefix
 		self.feature_prefix = feature_prefix		
 		self.folds_dates = []
-		self.x_transform_class = x_transform_class if x_transform_class is not None else IdleTransform  # Store the class, not an instance
-		self.y_transform_class = y_transform_class if y_transform_class is not None else IdleTransform  # Store the class, not an instance		
+		self.x_transform = x_transform if x_transform is not None else IdleTransform()  # Store the class, not an instance
+		self.y_transform = y_transform if y_transform is not None else IdleTransform()  # Store the class, not an instance		
 
 		self._verify_inputs(datasets)
 
@@ -243,8 +246,8 @@ class Dataset:
 									x_test, 
 									y_test, 
 									df_test.index, 
-									self.x_transform_class, 
-									self.y_transform_class, 
+									self.x_transform, 
+									self.y_transform, 
 									key, 
 									self.x_cols, 
 									self.y_cols
