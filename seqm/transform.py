@@ -1,10 +1,37 @@
 
 import numpy as np
 import pandas as pd
+from abc import ABC, abstractmethod
 
-class DummyNormalizer:
+class BaseTransform(ABC):
+	
+	@abstractmethod
+	def fit(self,arr: np.ndarray) -> 'BaseTransform':
+		"""Subclasses must implement this method"""
+		pass
+
+	@abstractmethod
+	def transform(self,arr: np.ndarray) -> np.ndarray:
+		"""Subclasses must implement this method"""
+		pass
+	
+	@abstractmethod
+	def inverse_transform(self,arr: np.ndarray) -> np.ndarray:
+		"""Subclasses must implement this method"""
+		pass
+
+	@property
+	@abstractmethod
+	def p_scale(self) -> float:
+		"""Subclasses must implement this method"""
+		pass
+
+class IdleTransform(BaseTransform):
 	def __init__(self):
-		self.p_scale=1 # scalar
+		pass
+	@property
+	def p_scale(self):
+		return 1	
 	def fit(self,data):
 		return self
 	def transform(self,data):
@@ -12,8 +39,9 @@ class DummyNormalizer:
 	def inverse_transform(self,data):
 		return data
 
-class Normalizer:
-	def __init__(self):
+class MeanScaleTransform(BaseTransform):
+	def __init__(self,demean=True):
+		self.demean = demean
 		self.mean = None
 		self.std = None		
 
@@ -33,14 +61,19 @@ class Normalizer:
 		"""Normalize the data."""
 		if self.mean is None or self.std is None:
 			raise ValueError("Normalizer must be fitted before transforming data.")
-		return (data - self.mean) / self.std
+		if self.demean: 
+			return (data - self.mean) / self.std
+		else:
+			return data / self.std
 
 	def inverse_transform(self, data):
 		"""Reverse the normalization process."""
 		if self.mean is None or self.std is None:
 			raise ValueError("Normalizer must be fitted before inverse transforming data.")
-		return (data * self.std) + self.mean
-
+		if self.demean:
+			return (data * self.std) + self.mean
+		else:
+			return data * self.std
 
 if __name__=='__main__':
 	pass

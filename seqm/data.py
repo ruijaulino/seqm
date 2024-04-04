@@ -6,16 +6,28 @@ from typing import List, Union, Dict
 import copy
 
 try:
-	from .normalize import Normalizer,DummyNormalizer
+	from .transform import BaseTransform,IdleTransform
 	from .constants import *
 except ImportError:
-	from normalize import Normalizer,DummyNormalizer
+	from transform import BaseTransform,IdleTransform
 	from constants import *
 # base class that contains a data element in numpy array form
 # models can be applied to it
 
 class Element:
-	def __init__(self, x_train, y_train, x_test, y_test, ts=None, normalizer_class=DummyNormalizer, key='', x_cols=None, y_cols=None):
+	def __init__(
+			self, 
+			x_train: np.ndarray, 
+			y_train: np.ndarray, 
+			x_test: np.ndarray, 
+			y_test: np.ndarray, 
+			ts=None, 
+			x_transform_class: BaseTransform = None, 
+			y_transform_class: BaseTransform = None, 
+			key: str = '', 
+			x_cols = None, 
+			y_cols = None
+			):
 		self.x_train, self.y_train, self.x_test, self.y_test = x_train, y_train, x_test, y_test
 		self.ts = pd.date_range('1950-01-01', freq='D', periods=self.x_test.shape[0]) if ts is None else ts
 		self.key = key or 'Dataset'
@@ -26,10 +38,12 @@ class Element:
 		assert self.x_test.shape[1] == self.x_train.shape[1], "x_train and x_test must have the same number of variables"
 		assert self.y_test.shape[1] == self.y_train.shape[1], "y_train and y_test must have the same number of variables"		
 
-		self.normalizer_class = normalizer_class if normalizer_class is not None else DummyNormalizer  # Store the class, not an instance
+		self.x_transform_class = x_transform_class if x_transform_class is not None else IdleTransform  # Store the class, not an instance
+		self.y_transform_class = y_transform_class if y_transform_class is not None else IdleTransform  # Store the class, not an instance
+
 		self.model = None  # Placeholder for a trained model
 		# fit transform at instantiation
-		self.x_normalizer,self.y_normalizer=None,None		
+		self.x_transformer,self.y_transformer=None,None		
 		self.s,self.w,self.pw=None,None,None
 		
 		self._verify_input_data()
@@ -72,20 +86,20 @@ class Element:
 
 	def _fit_transform(self):
 		"""Fit and transform the training data using dedicated normalizers."""
-		self.x_normalizer = self.normalizer_class()
-		self.y_normalizer = self.normalizer_class()
-		self.x_normalizer.fit(self.x_train)
-		self.x_train = self.x_normalizer.transform(self.x_train)
-		self.y_normalizer.fit(self.y_train)
-		self.y_train = self.y_normalizer.transform(self.y_train)
-		# can transform now the test x
-		self.x_test = self.x_normalizer.transform(self.x_test)
+		self.x_transformer = self.x_transform_class()
+		self.y_transformer = self.y_transform_class()
 
-	def estimate(self, model, estimate_params=None):
+		self.x_transformer.fit(self.x_train)
+		self.x_train = self.x_transformer.transform(self.x_train)
+		self.y_transformer.fit(self.y_train)
+		self.y_train = self.y_transformer.transform(self.y_train)
+		# can transform now the test x
+		self.x_test = self.x_transformer.transform(self.x_test)
+
+	def estimate(self, model, **kwargs):
 		"""Train the model using the training data contained within this DataElement."""
-		estimate_params = estimate_params or {}
 		self.model=copy.deepcopy(model)  		
-		self.model.estimate(x=self.x_train, y=self.y_train, **estimate_params)
+		self.model.estimate(x=self.x_train, y=self.y_train)
 
 	def evaluate(self):
 		"""Evaluate the model using the test data and return performance metrics."""
@@ -95,13 +109,13 @@ class Element:
 		p = self.y_test.shape[1]
 		self.s = np.zeros(n, dtype=np.float64)
 		self.w = np.zeros((n, p), dtype=np.float64)
-		self.pw = self.y_normalizer.p_scale*np.ones(n, dtype=np.float64)
+		self.pw = self.y_transformer.p_scale*np.ones(n, dtype=np.float64)
 		
 		for i in range(n):
 			# normalize y for input (make copy of y)
-			y_normalized = self.y_normalizer.transform(np.array(self.y_test[:i]))
+			y_hat = self.y_transformer.transform(np.array(self.y_test[:i]))
 			# the x input is already normalized!
-			w = self.model.get_weight(**{'y': y_normalized, 'x': self.x_test[:i], 'xq': self.x_test[i]})
+			w = self.model.get_weight(**{'y': y_hat, 'x': self.x_test[:i], 'xq': self.x_test[i]})
 			self.w[i] = w
 			self.s[i] = np.dot(self.y_test[i], w)
 
@@ -155,7 +169,8 @@ class Dataset:
 
 	def __init__(self, 
 				datasets: Union[pd.DataFrame, Dict[str,pd.DataFrame]],  
-				normalizer_class=DummyNormalizer, 
+				x_transform_class: BaseTransform = None, 
+				y_transform_class: BaseTransform = None,
 				target_prefix='y', 
 				feature_prefix='x'
 				):
@@ -163,7 +178,9 @@ class Dataset:
 		self.target_prefix = target_prefix
 		self.feature_prefix = feature_prefix		
 		self.folds_dates = []
-		self.normalizer_class = normalizer_class if normalizer_class is not None else DummyNormalizer  # Store the class, not an instance
+		self.x_transform_class = x_transform_class if x_transform_class is not None else IdleTransform  # Store the class, not an instance
+		self.y_transform_class = y_transform_class if y_transform_class is not None else IdleTransform  # Store the class, not an instance		
+
 		self._verify_inputs(datasets)
 
 	def _verify_inputs(self, datasets):
@@ -219,7 +236,20 @@ class Dataset:
 
 			if x_train.shape[0]!=0 and x_test.shape[0]!=0:			
 
-				elements.add(Element(x_train, y_train, x_test, y_test, df_test.index, self.normalizer_class, key, self.x_cols, self.y_cols))
+				elements.add(
+							Element(
+									x_train, 
+									y_train, 
+									x_test, 
+									y_test, 
+									df_test.index, 
+									self.x_transform_class, 
+									self.y_transform_class, 
+									key, 
+									self.x_cols, 
+									self.y_cols
+									)
+							)
 		
 		return elements
 

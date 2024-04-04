@@ -9,12 +9,12 @@ import tqdm
 try:
 	from .models import ConditionalGaussian
 	from .loads import save_file
-	from .normalize import Normalizer,DummyNormalizer
+	from .transform import IdleTransform,BaseTransform
 	from .data import Element,Elements,Dataset,Path
 except ImportError:
 	from models import ConditionalGaussian
 	from loads import save_file
-	from normalize import Normalizer,DummyNormalizer
+	from transform import IdleTransform,BaseTransform
 	from data import Element,Elements,Dataset,Path
 
 def train(self):
@@ -67,7 +67,7 @@ if __name__=='__main__':
 	
 	model=ConditionalGaussian(n_gibbs=None,kelly_std=3,max_w=100)
 	data={'Dataset 1':data1,'Dataset 2':data2,'Dataset 3':data3}
-	dataset=Dataset(data,normalizer_class=Normalizer)
+	dataset=Dataset(data,x_transform_class=IdleTransform)
 	
 	paths=cvbt(dataset,model, k_folds=4, seq_path=False, start_fold=0, n_paths=4, burn_fraction=0.1, min_burn_points=3, single_model=True)
 
