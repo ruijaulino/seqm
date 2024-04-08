@@ -6,15 +6,15 @@ from typing import List, Union, Dict
 import copy
 
 try:
-	from .elements import Element,Elements,Path
+	from .elements import Element,Elements
 	from .transform import BaseTransform,IdleTransform
 	from .constants import *
-	from .model_pipe import ModelPipe,ModelPipes
+	from .model_pipe import ModelPipe,ModelPipes,Path
 except ImportError:
-	from elements import Element,Elements,Path
+	from elements import Element,Elements
 	from transform import BaseTransform,IdleTransform
 	from constants import *
-	from model_pipe import ModelPipe,ModelPipes
+	from model_pipe import ModelPipe,ModelPipes,Path
 
 # dict of Dataframes with properties
 class Dataset:
@@ -59,7 +59,7 @@ class Dataset:
 	# split dates into folds for posterior use
 	def split_dates(self, k_folds=3):
 		ts = pd.DatetimeIndex([])
-		for k,df in self.dataset:
+		for k,df in self.dataset.items():
 			ts = ts.union(df.index.unique())
 		ts = ts.sort_values()
 		idx_folds = np.array_split(ts, k_folds)
@@ -123,7 +123,8 @@ class Dataset:
 			raise ValueError("Cannot start at fold 0 when path is sequential")
 		if self.folds_dates is None:
 			raise ValueError("Need to split before getting the split")
-		
+		assert self.keys()==model_pipes.keys(),"dataset and model_pipes must have the same keys"
+
 		for key, df in self.items():
 			ts_lower, ts_upper = self.folds_dates[test_index]
 			df_pre_test = df[df.index < ts_lower]
@@ -142,25 +143,8 @@ class Dataset:
 			x_cols,y_cols=self.get_xy_cols(df)
 
 			if x_train.shape[0]!=0 and x_test.shape[0]!=0:			
-
-				elements[key]=Element(
-									x_train, 
-									y_train, 
-									x_test, 
-									y_test, 
-									df_test.index, 
-									x_cols, 
-									y_cols,
-									key, 
-									)
-		return elements
-
-
-
-
-
-
-
+				model_pipes[key].set_cols(x_cols, y_cols).set_data(x_train, y_train, x_test, y_test, df_test.index)
+		return model_pipes
 
 
 # handles a dict of dataframes with data to train/test models

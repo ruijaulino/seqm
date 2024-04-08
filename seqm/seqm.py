@@ -10,17 +10,17 @@ try:
 	from .models import ConditionalGaussian
 	from .loads import save_file
 	from .transform import IdleTransform,BaseTransform,RollPWScaleTransform
-	from .elements import Element,Elements,Path
+	from .elements import Element,Elements
 	from .dataset import Dataset
-	from .model_pipe import ModelPipe,ModelPipes
+	from .model_pipe import ModelPipe,ModelPipes,Path
 	from .post_process import post_process,portfolio_post_process
 except ImportError:
 	from models import ConditionalGaussian
 	from loads import save_file
 	from transform import IdleTransform,BaseTransform,RollPWScaleTransform
-	from elements import Element,Elements,Path
+	from elements import Element,Elements
 	from dataset import Dataset
-	from model_pipe import ModelPipe,ModelPipes
+	from model_pipe import ModelPipe,ModelPipes,Path
 	from post_process import post_process,portfolio_post_process
 
 
@@ -47,7 +47,6 @@ def live(dataset: Dataset):
 	# just evaluate last point
 	pass
 
-
 def cvbt(
 		dataset:Dataset, 
 		model_pipes:ModelPipes, 
@@ -73,26 +72,21 @@ def cvbt(
 	for m in tqdm.tqdm(range(n_paths)):
 		path=Path()
 		for fold_index in range(start_fold, k_folds):			
-			elements = dataset.get_train_test_elements(
+			# make a copy of the original model_pipes
+			local_model_pipes = dataset.set_train_test_fold(
+														model_pipes=copy.deepcopy(model_pipes),
 														test_index=fold_index,
 														burn_fraction=burn_fraction,
 														min_burn_points=min_burn_points,
 														seq_path=seq_path
 														)
 			
-			elements.view()
-
-
-
-
-			print('ola!')
-			print(sdfsdf)
-
-			elements.set_model_wrapper(model_wrapper)
-			
-			elements.estimate(single_model=single_model,view_models=view_models)
-			elements.evaluate()
-			path.add(elements)
+			local_model_pipes.estimate(share_model = share_model)
+			local_model_pipes.evaluate()
+			path.add(local_model_pipes)
+		path.join()
+		print(path)
+		print(sdfsdf)
 		paths.append(path.get_results())
 	return paths
 
@@ -139,10 +133,40 @@ def run_train_test():
 	dataset=Dataset({'dataset 1':data1,'dataset 2':data2})
 	test(dataset, model_pipes)
 
+def run_cvbt():
+	data1=generate_lr(n=100,a=0,b=0.1,start_date='2000-01-01')
+	data2=generate_lr(n=70,a=0,b=0.1,start_date='2000-06-01')
+	data3=generate_lr(n=150,a=0,b=0.1,start_date='2001-01-01')
+	
+	# create dataset
+	dataset=Dataset({'dataset 1':data1,'dataset 2':data2})	
+	model=ConditionalGaussian(n_gibbs=None,kelly_std=3,max_w=100)
+	model_pipes=ModelPipes(model)
+	for key in dataset.keys():
+		# model=ConditionalGaussian(n_gibbs=None,kelly_std=3,max_w=100)
+		# did not set individual model on purpose
+		# but can be done (need to test this feature!)
+		model_pipe = ModelPipe(x_transform = RollPWScaleTransform(window=10),y_transform = RollPWScaleTransform(window=10))
+		model_pipes[key] = model_pipe
+
+	cvbt(
+		dataset, 
+		model_pipes, 
+		k_folds=4, 
+		seq_path=False, 
+		start_fold=0, 
+		n_paths=4, 
+		burn_fraction=0.1, 
+		min_burn_points=3, 
+		share_model=True, 
+		view_models=False
+		)
 
 if __name__=='__main__':
 
-	run_train_test()
+	run_cvbt()
+
+	# run_train_test()
 
 
 

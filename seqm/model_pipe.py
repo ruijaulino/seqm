@@ -162,26 +162,27 @@ class ModelPipe:
 
 	def evaluate(self):
 		"""Evaluate the model using the test data and return performance metrics."""
-		n = self.y_test.shape[0]
-		p = self.y_test.shape[1]
-		self.s = np.zeros(n, dtype=np.float64)
-		self.w = np.zeros((n, p), dtype=np.float64)
-		self.pw = np.ones(n, dtype=np.float64)
+		if self.y_test is not None:
+			n = self.y_test.shape[0]
+			p = self.y_test.shape[1]
+			self.s = np.zeros(n, dtype=np.float64)
+			self.w = np.zeros((n, p), dtype=np.float64)
+			self.pw = np.ones(n, dtype=np.float64)
 
-		for i in range(n):
-			# normalize y for input (make copy of y)
-			# make sure this array does not get modified
-			# the x input is already normalized!
-			w = self.get_weight(
-								xq = self.x_test[i], 
-								x = self.x_test[:i], 
-								y = self.y_test[:i], 
-								apply_transform_x = True, 
-								apply_transform_y = True
-								)
-			self.w[i] = w
-			self.s[i] = np.dot(self.y_test[i], w)
-			self.pw[i] = self.get_pw(self.y_test[:i])
+			for i in range(n):
+				# normalize y for input (make copy of y)
+				# make sure this array does not get modified
+				# the x input is already normalized!
+				w = self.get_weight(
+									xq = self.x_test[i], 
+									x = self.x_test[:i], 
+									y = self.y_test[:i], 
+									apply_transform_x = True, 
+									apply_transform_y = True
+									)
+				self.w[i] = w
+				self.s[i] = np.dot(self.y_test[i], w)
+				self.pw[i] = self.get_pw(self.y_test[:i])
 
 # dict of ModelWrappers
 class ModelPipes:
@@ -232,8 +233,10 @@ class ModelPipes:
 			# on all data joined
 			# it is assumed that the individual model pipes
 			# have suitable normalizations
-			x = np.vstack([e.x_train for k,e in self.items()])
-			y = np.vstack([e.y_train for k,e in self.items()])
+
+			# TO DO: WHY CAN x_train BE None WHEN DOING CVBT??
+			x = np.vstack([e.x_train for k,e in self.items() if e.x_train is not None])
+			y = np.vstack([e.y_train for k,e in self.items() if e.y_train is not None])
 			self.model.estimate(**{'x':x,'y':y})
 			# set individual copies			
 			for k,e in self.items(): e.set_model(self.model)
@@ -244,3 +247,81 @@ class ModelPipes:
 	def evaluate(self):
 		for k,e in self.items(): e.evaluate()
 		return self
+
+
+# Path is a collection/list of ModelPipes
+class Path:
+	def __init__(self):
+		self.model_pipes=[]
+		self.results={}
+		self.s,self.w,self.pw={},{},{}
+		self.joined=False
+
+	@property
+	def keys(self):
+		if len(self.model_pipes)!=0:
+			return list(self.model_pipes.keys())
+		else:
+			return []
+
+	def add(self,item:ModelPipes):
+		if isinstance(item, ModelPipes):
+			self.model_pipes.append(item)
+		else:
+			raise TypeError("Item must be an instance of ModelPipes")
+
+	def __getitem__(self, index):
+		return self.model_pipes[index]
+
+	def __len__(self):
+		return len(self.model_pipes)
+
+	def __iter__(self):
+		return iter(self.model_pipes)
+
+	# join path results by name
+	def join(self):
+		# join strategy performance for
+		# all series in all model_pipes
+		self.s={}
+		self.w={}
+		self.pw={}
+		for key in self.keys:
+			self.s.update({key:[]})
+			self.w.update({key:[]})
+			self.pw.update({key:[]})
+		# iterate model_pipes
+		for es in self:
+			tmp={}
+			# iterate series in element
+			for e in es:
+				if e.s is not None:
+					# get performance dataframe
+					self.s[e.key].append(e.get_s())
+					# get weight dataframe
+					self.w[e.key].append(e.get_w())
+					# get portfolio weight
+					self.pw[e.key].append(e.get_pw())
+		for k,v in self.s.items():
+			tmp=pd.concat(self.s[k],axis=0)
+			tmp=tmp.sort_index()
+			self.s[k]=tmp
+		for k,v in self.w.items():
+			tmp=pd.concat(self.w[k],axis=0)
+			tmp=tmp.sort_index()
+			self.w[k]=tmp
+		for k,v in self.pw.items():
+			tmp=pd.concat(self.pw[k],axis=0)
+			tmp=tmp.sort_index()			
+			self.pw[k]=tmp		
+		self.joined=True
+		return self
+	
+	def get_results(self):
+		if not self.joined: self.join()
+		self.results={}
+		for key in self.keys:			
+			self.results.update({key:pd.concat([self.s.get(key),self.w.get(key),self.pw.get(key)],axis=1)})
+		if len(self.keys)==1:
+			self.results=self.results.get(self.keys[0])
+		return self.results		

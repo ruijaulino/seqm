@@ -232,7 +232,7 @@ class Elements_:
 		return self
 
 # Path is a collection/list of Elements
-class Path:
+class Path_:
 	def __init__(self):
 		self.elements=[]
 		self.results={}
