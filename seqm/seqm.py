@@ -12,7 +12,7 @@ try:
 	from .transform import IdleTransform,BaseTransform,RollPWScaleTransform
 	from .elements import Element,Elements,Path
 	from .dataset import Dataset
-	from .model_wrapper import ModelWrapper,ModelsWrappers
+	from .model_pipe import ModelPipe,ModelPipes
 	from .post_process import post_process,portfolio_post_process
 except ImportError:
 	from models import ConditionalGaussian
@@ -20,13 +20,26 @@ except ImportError:
 	from transform import IdleTransform,BaseTransform,RollPWScaleTransform
 	from elements import Element,Elements,Path
 	from dataset import Dataset
-	from model_wrapper import ModelWrapper,ModelsWrappers
+	from model_pipe import ModelPipe,ModelPipes
 	from post_process import post_process,portfolio_post_process
 
 
-def train(dataset: Dataset, model, single_model = True, return_model = True):
-	elements = dataset.get_train()
+def check_keys():
+	pass
+
+
+def train(dataset: Dataset, model_pipes:ModelPipes, share_training_data = True):
+	
+	# check keys
+	assert dataset.keys()==model_pipes.keys(),"dataset and model_pipes must have the same keys"
+
+	
+	
+	# parse dataset into train elements
+	elements = dataset.get_train() 
 	elements.view()
+
+
 	
 	print('all_cols_equal: ', elements.all_cols_equal)
 	print('ola!')
@@ -34,6 +47,8 @@ def train(dataset: Dataset, model, single_model = True, return_model = True):
 	elements.estimate(model, single_model = single_model)
 	return elements.get_model() if return_model else elements   
 
+	# return trained model pipelines
+	return model_pipes
 
 def test(dataset: Dataset):	
 	pass
@@ -44,7 +59,7 @@ def live(dataset: Dataset):
 	pass
 
 
-def cvbt(dataset:Dataset, model_wrapper:ModelWrapper, k_folds=4, seq_path=False, start_fold=0, n_paths=4, burn_fraction=0.1, min_burn_points=3, single_model=True, view_models=False):
+def cvbt(dataset:Dataset, model_wrapper:ModelPipes, k_folds=4, seq_path=False, start_fold=0, n_paths=4, burn_fraction=0.1, min_burn_points=3, share_training_data=True, view_models=False):
 	'''
 	each path generates a dict like
 	{dataset1:df1,dataset2,df2,..}
@@ -96,17 +111,25 @@ if __name__=='__main__':
 	data2=generate_lr(n=70,a=0,b=0.1,start_date='2000-06-01')
 	data3=generate_lr(n=150,a=0,b=0.1,start_date='2001-01-01')
 	
-
-
-	model=ConditionalGaussian(n_gibbs=None,kelly_std=3,max_w=100)
-	model_wrapper = ModelWrapper(model, x_transform = RollPWScaleTransform(window=10),y_transform = RollPWScaleTransform(window=10))
-
+	# create dataset
 	dataset=Dataset({'dataset 1':data1,'dataset 2':data2})
+
+	# create models for dataset
+	model_pipes=ModelPipes()
+	for key in dataset.keys():
+		model=ConditionalGaussian(n_gibbs=None,kelly_std=3,max_w=100)
+		model_pipe = ModelPipe(model, x_transform = RollPWScaleTransform(window=10),y_transform = RollPWScaleTransform(window=10))
+		model_pipes[key] = model_pipe
+
+	train(dataset, model_pipes, share_training_data = True)
+
+	#elements = dataset.get_train()
+	#elements.view()
 
 	# CVBT to evaluate model
 	# paths=cvbt(dataset, model_wrapper, k_folds=4, seq_path=False, start_fold=0, n_paths=4, burn_fraction=0.1, min_burn_points=3, single_model=True)
 	
-	train(dataset, model_wrapper, single_model = True, return_model = True)
+	# train(dataset, model_wrapper)
 
 	# portfolio_post_process(paths,pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,view_weights=True,use_pw=True)
 

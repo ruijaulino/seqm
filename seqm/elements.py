@@ -7,11 +7,11 @@ import copy
 
 try:
 	from .transform import BaseTransform,IdleTransform
-	from .model_wrapper import ModelWrapper
+	from .model_pipe import ModelPipe,ModelPipes
 	from .constants import *
 except ImportError:
 	from transform import BaseTransform,IdleTransform
-	from model_wrapper import ModelWrapper
+	from model_pipe import ModelPipe,ModelPipes
 	from constants import *
 
 
@@ -98,9 +98,6 @@ class Element:
 			self.pw[i] = self.y_transform.pw(y_test_copy)
 
 
-
-
-
 # dict of ModelWrappers
 class Elements:
 	def __init__(self):
@@ -148,9 +145,11 @@ class Elements:
 					return False 
 		return True
 	
-	def estimate(self,single_model=False,view_models=False):
-		print('not yet estimate')
-		print(sdfsdf)
+	def estimate(self,model_pipes:ModelPipes, share_training_data = True):
+
+		if share_training_data:
+
+
 		if single_model:
 			x=np.vstack([e.x_train for e in self])
 			y=np.vstack([e.y_train for e in self])
@@ -161,10 +160,11 @@ class Elements:
 			# set same model for all element
 			for e in self: e.set_model(model)
 		else:
-			for e in self: e.estimate(model)
+			for k,e in self.items():
+				model_pipes[k].estimate(x=self.x_train,y=self.y_train)
 		return self
 
-	def evaluate(self):
+	def evaluate(self,model_pipes:ModelPipes):
 		print('not yet evaluate')
 		print(sdfsdf)
 		for e in self: e.evaluate()

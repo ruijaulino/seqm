@@ -15,7 +15,7 @@ except ImportError:
 	from constants import *
 
 # class with a model and a transformer
-class ModelWrapper:
+class ModelPipe:
 	
 	def __init__(
 				self,
@@ -91,35 +91,42 @@ class ModelWrapper:
 
 
 # dict of ModelWrappers
-class ModelsWrappers:
-	def __init__(self):
-		self.items = {}
+class ModelPipes:
+	def __init__(self, ):
+		self.models = {}
 
-	def add(self, key, item: ModelWrapper):
-		if not isinstance(item, ModelWrapper):
-			raise TypeError("Item must be an instance of ModelWrapper")
-		self.items[key] = copy.deepcopy(item)
+	def add(self, key, item: ModelPipe):
+		if not isinstance(item, ModelPipe):
+			raise TypeError("Item must be an instance of ModelPipe")
+		self.models[key] = copy.deepcopy(item)
 
 	def __getitem__(self, key):
-		return self.items[key]
+		return self.models[key]
 
-	def __setitem__(self, key, item: ModelWrapper):
-		if not isinstance(item, ModelWrapper):
-			raise TypeError("Item must be an instance of ModelWrapper")
-		self.items[key] = copy.deepcopy(item)
+	def __setitem__(self, key, item: ModelPipe):
+		if not isinstance(item, ModelPipe):
+			raise TypeError("Item must be an instance of ModelPipe")
+		self.models[key] = copy.deepcopy(item)
 
 	def __len__(self):
-		return len(self.items)
+		return len(self.models)
 
 	def __iter__(self):
-		return iter(self.items)
+		return iter(self.models)
 
 	def keys(self):
-		return self.items.keys()
+		return self.models.keys()
 
 	def values(self):
-		return self.items.values()
+		return self.models.values()
 
 	def items(self):
-		return self.items.items()
+		return self.models.items()
+
+	# more methods
+	def has_keys(self,keys:list):
+		for key in keys:
+			if key not in self.keys():
+				return False
+		return True
 
