@@ -28,38 +28,38 @@ def check_keys():
 	pass
 
 
-def train(dataset: Dataset, model_pipes:ModelPipes, share_training_data = True):
-	
-	# check keys
-	assert dataset.keys()==model_pipes.keys(),"dataset and model_pipes must have the same keys"
+def train(dataset: Dataset, model_pipes:ModelPipes, share_model = True):
+	# associate model pipes with the dataset
+	model_pipes = dataset.set_train(model_pipes)
+	# estimate models
+	model_pipes.estimate(share_model = share_model)
 
-	
-	
-	# parse dataset into train elements
-	elements = dataset.get_train() 
-	elements.view()
-
-
-	
-	print('all_cols_equal: ', elements.all_cols_equal)
-	print('ola!')
-	print(sdfsdf)				
-	elements.estimate(model, single_model = single_model)
-	return elements.get_model() if return_model else elements   
-
-	# return trained model pipelines
 	return model_pipes
 
-def test(dataset: Dataset):	
-	pass
-
+def test(dataset: Dataset, model_pipes: ModelPipes):
+	model_pipes = dataset.set_test(model_pipes)
+	model_pipes.evaluate()
+	for k,e in model_pipes.items():
+		plt.plot(np.cumsum(e.s))
+		plt.show()	
 
 def live(dataset: Dataset):
 	# just evaluate last point
 	pass
 
 
-def cvbt(dataset:Dataset, model_wrapper:ModelPipes, k_folds=4, seq_path=False, start_fold=0, n_paths=4, burn_fraction=0.1, min_burn_points=3, share_training_data=True, view_models=False):
+def cvbt(
+		dataset:Dataset, 
+		model_pipes:ModelPipes, 
+		k_folds=4, 
+		seq_path=False, 
+		start_fold=0, 
+		n_paths=4, 
+		burn_fraction=0.1, 
+		min_burn_points=3, 
+		share_model=True, 
+		view_models=False
+		):
 	'''
 	each path generates a dict like
 	{dataset1:df1,dataset2,df2,..}
@@ -67,7 +67,7 @@ def cvbt(dataset:Dataset, model_wrapper:ModelPipes, k_folds=4, seq_path=False, s
 	the output is a list of this dicts
 	'''
 	# Prepare the data
-	dataset.split_dates(k_folds)		
+	dataset.split_dates(k_folds)			
 	start_fold = max(1, start_fold) if seq_path else start_fold		
 	paths = []
 	for m in tqdm.tqdm(range(n_paths)):
@@ -97,16 +97,17 @@ def cvbt(dataset:Dataset, model_wrapper:ModelPipes, k_folds=4, seq_path=False, s
 	return paths
 
 
-if __name__=='__main__':
-	# generate data
-	def generate_lr(n=1000,a=0,b=0.1,start_date='2000-01-01'):
-		x=np.random.normal(0,0.01,n)
-		a=0
-		b=0.1
-		y=a+b*x+np.random.normal(0,0.01,n)
-		dates=pd.date_range(start_date,periods=n,freq='B')
-		data=pd.DataFrame(np.hstack((y[:,None],x[:,None])),columns=['y1','x1'],index=dates)
-		return data
+# generate data
+def generate_lr(n=1000,a=0,b=0.1,start_date='2000-01-01'):
+	x=np.random.normal(0,0.01,n)
+	a=0
+	b=0.1
+	y=a+b*x+np.random.normal(0,0.01,n)
+	dates=pd.date_range(start_date,periods=n,freq='B')
+	data=pd.DataFrame(np.hstack((y[:,None],x[:,None])),columns=['y1','x1'],index=dates)
+	return data
+
+def run_train_test():
 	data1=generate_lr(n=100,a=0,b=0.1,start_date='2000-01-01')
 	data2=generate_lr(n=70,a=0,b=0.1,start_date='2000-06-01')
 	data3=generate_lr(n=150,a=0,b=0.1,start_date='2001-01-01')
@@ -115,27 +116,33 @@ if __name__=='__main__':
 	dataset=Dataset({'dataset 1':data1,'dataset 2':data2})
 
 	# create models for dataset
-	model_pipes=ModelPipes()
+	model=ConditionalGaussian(n_gibbs=None,kelly_std=3,max_w=100)
+	model_pipes=ModelPipes(model)
 	for key in dataset.keys():
-		model=ConditionalGaussian(n_gibbs=None,kelly_std=3,max_w=100)
-		model_pipe = ModelPipe(model, x_transform = RollPWScaleTransform(window=10),y_transform = RollPWScaleTransform(window=10))
+		# model=ConditionalGaussian(n_gibbs=None,kelly_std=3,max_w=100)
+		# did not set individual model on purpose
+		# but can be done (need to test this feature!)
+		model_pipe = ModelPipe(x_transform = RollPWScaleTransform(window=10),y_transform = RollPWScaleTransform(window=10))
 		model_pipes[key] = model_pipe
-
-	train(dataset, model_pipes, share_training_data = True)
-
-	#elements = dataset.get_train()
-	#elements.view()
-
-	# CVBT to evaluate model
-	# paths=cvbt(dataset, model_wrapper, k_folds=4, seq_path=False, start_fold=0, n_paths=4, burn_fraction=0.1, min_burn_points=3, single_model=True)
+	print('single train')
+	# single train
+	model_pipes = train(dataset, model_pipes, share_model = True)
+	for k,e in model_pipes.items():
+		e.view()
+	print('----------')
+	print('RUN TEST')
+	data1=generate_lr(n=100,a=0,b=0.1,start_date='2005-01-01')
+	data2=generate_lr(n=70,a=0,b=0.1,start_date='2005-06-01')
+	data3=generate_lr(n=150,a=0,b=0.1,start_date='2005-01-01')
 	
-	# train(dataset, model_wrapper)
+	# create dataset
+	dataset=Dataset({'dataset 1':data1,'dataset 2':data2})
+	test(dataset, model_pipes)
 
-	# portfolio_post_process(paths,pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,view_weights=True,use_pw=True)
 
-	# TRAIN/TEST
-	# model=train(dataset, model, single_model = False, return_model = True)
-	# for k,m in model.items(): m.view()
-	
-	# LIVE
+if __name__=='__main__':
+
+	run_train_test()
+
+
 

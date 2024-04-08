@@ -15,26 +15,60 @@ except ImportError:
 	from constants import *
 
 # class with a model and a transformer
+# train, test, live of model
 class ModelPipe:
 	
 	def __init__(
 				self,
-				model = None, 
 				x_transform:BaseTransform = None, 
 				y_transform:BaseTransform = None,
+				model = None, 
 				key: str = ''
 				):
 		self.model=copy.deepcopy(model)
 		self.x_transform = copy.deepcopy(x_transform) if x_transform is not None else IdleTransform()  # Store the class, not an instance
 		self.y_transform = copy.deepcopy(y_transform) if y_transform is not None else IdleTransform()  # Store the class, not an instance
 		self.key = key or 'Dataset'
+		self.s,self.w,self.pw = None,None,None
+		self.x_cols,self.y_cols = None,None
+		self.x_train,self.y_train = None,None
+		self.x_test,self.y_test = None,None
+		self.ts = None
 
 	def view(self):
-		print('** Model Wrapper **')
-		self.model.view()
-		self.x_transform.view()
-		self.y_transform.view()
+		print('** Element **')
+		if self.x_train is not None:
+			print('- Train')
+			print(pd.DataFrame(np.hstack((self.x_train,self.y_train)),columns=self.x_cols+self.y_cols))
+		if self.x_test is not None:
+			print('- Test')
+			print(pd.DataFrame(np.hstack((self.x_test,self.y_test)),columns=self.x_cols+self.y_cols,index=self.ts))
+		if self.s is not None:
+			print('- Strategy')
+			print(self.get_s())
+			print('- Weight')
+			print(self.get_pw())
+
+	def get_s(self):
+		if self.s is not None:
+			return pd.DataFrame(self.s,columns=[STRATEGY_COLUMN],index=self.ts)
+		else:
+			return pd.DataFrame(columns=[STRATEGY_COLUMN])
+	def get_w(self):
+		return pd.DataFrame(self.w,columns=[WEIGHT_PREFIX_COLUMNS+c for c in self.y_cols],index=self.ts)
 		
+	def get_pw(self):
+		return pd.DataFrame(self.pw,columns=[PORTFOLIO_WEIGHT_COLUMN],index=self.ts)
+
+	def view(self):
+		print()
+		print('** Model Pipe **')
+		self.model.view()
+		print()
+		self.x_transform.view()
+		print()
+		self.y_transform.view()
+		print()
 	# setters
 	def set_model(self, model):
 		self.model=copy.deepcopy(model)
@@ -47,6 +81,11 @@ class ModelPipe:
 	def set_y_transform(self,y_transform:BaseTransform):
 		self.y_transform=y_transform
 		return self
+
+	def fit_transform(self):
+		self.fit_x_transform(self.x_train).fit_y_transform(self.y_train)
+		self.x_train=self.transform_x(self.x_train)
+		self.y_train=self.transform_y(self.y_train)
 
 	# fit transform
 	def fit_x_transform(self,x_train):
@@ -69,10 +108,43 @@ class ModelPipe:
 	# estimate model
 	def estimate(self, x, y, **kwargs):
 		"""Train the model using the training data contained within this DataElement."""
-		self.fit_x_transform(x).fit_y_transform(y)
-		x=self.transform_x(x)
-		y=self.transform_y(y)
-		self.model.estimate(x=x, y=y)
+		# self.fit_x_transform(x).fit_y_transform(y)
+		# x=self.transform_x(x)
+		# y=self.transform_y(y)
+		self.model.estimate(x=self.x_train, y=self.y_train)
+		return self
+
+	# --------------------------
+	# main external methods
+	# --------------------------
+	# set data
+
+	def set_cols(self, x_cols:list, y_cols:list):
+		self.x_cols,self.y_cols = x_cols,y_cols
+		return self
+
+	def check_cols(self, x_cols:list, y_cols:list):
+		assert x_cols==self.x_cols,"x columns do not match the existent model pipe"
+		assert y_cols==self.y_cols,"y columns do not match the existent model pipe"
+		return self
+
+	def set_train_data(self, x_train, y_train,copy_array = True):		
+		self.x_train = np.array(x_train) if copy_array else x_train
+		self.y_train = np.array(y_train) if copy_array else y_train
+		# when the train data is set, fit the transform
+		self.fit_transform()
+		return self
+
+	def set_test_data(self, x_test, y_test, ts, copy_array = True):
+		self.x_test = np.array(x_test) if copy_array else x_test
+		self.y_test = np.array(y_test) if copy_array else y_test
+		self.ts = copy.deepcopy(ts) if copy_array else ts
+		# do not transform here training data to make
+		# the implementation more clear when testing
+		return self
+
+	def set_data(self, x_train, y_train, x_test, y_test, ts):
+		self.set_train_data(x_train, y_train).set_test_data(x_test, y_test, ts)
 		return self
 
 	# get weight
@@ -84,15 +156,38 @@ class ModelPipe:
 		if xq is not None:
 			if apply_transform_x: xq = self.transform_x(xq,True)
 		return self.model.get_weight(**{'y': y, 'x': x, 'xq': xq})
-
 	# get portfolio weights from the transform
 	def get_pw(self,y):
 		return self.y_transform.pw(y)		
 
+	def evaluate(self):
+		"""Evaluate the model using the test data and return performance metrics."""
+		n = self.y_test.shape[0]
+		p = self.y_test.shape[1]
+		self.s = np.zeros(n, dtype=np.float64)
+		self.w = np.zeros((n, p), dtype=np.float64)
+		self.pw = np.ones(n, dtype=np.float64)
+
+		for i in range(n):
+			# normalize y for input (make copy of y)
+			# make sure this array does not get modified
+			# the x input is already normalized!
+			w = self.get_weight(
+								xq = self.x_test[i], 
+								x = self.x_test[:i], 
+								y = self.y_test[:i], 
+								apply_transform_x = True, 
+								apply_transform_y = True
+								)
+			self.w[i] = w
+			self.s[i] = np.dot(self.y_test[i], w)
+			self.pw[i] = self.get_pw(self.y_test[:i])
 
 # dict of ModelWrappers
 class ModelPipes:
-	def __init__(self, ):
+	def __init__(self, model = None):
+		# model to be used when we are sharing the model
+		self.model = copy.deepcopy(model)
 		self.models = {}
 
 	def add(self, key, item: ModelPipe):
@@ -130,3 +225,22 @@ class ModelPipes:
 				return False
 		return True
 
+	def estimate(self,share_model = True):
+		
+		if share_model:
+			# if the model is shared then we train a single model
+			# on all data joined
+			# it is assumed that the individual model pipes
+			# have suitable normalizations
+			x = np.vstack([e.x_train for k,e in self.items()])
+			y = np.vstack([e.y_train for k,e in self.items()])
+			self.model.estimate(**{'x':x,'y':y})
+			# set individual copies			
+			for k,e in self.items(): e.set_model(self.model)
+		else:
+			for k,m in self.items():m.estimate()
+		return self
+
+	def evaluate(self):
+		for k,e in self.items(): e.evaluate()
+		return self

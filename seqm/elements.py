@@ -148,7 +148,7 @@ class Elements:
 	def estimate(self,model_pipes:ModelPipes, share_training_data = True):
 
 		if share_training_data:
-
+			pass
 
 		if single_model:
 			x=np.vstack([e.x_train for e in self])

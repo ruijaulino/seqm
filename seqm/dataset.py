@@ -9,18 +9,19 @@ try:
 	from .elements import Element,Elements,Path
 	from .transform import BaseTransform,IdleTransform
 	from .constants import *
+	from .model_pipe import ModelPipe,ModelPipes
 except ImportError:
 	from elements import Element,Elements,Path
 	from transform import BaseTransform,IdleTransform
 	from constants import *
+	from model_pipe import ModelPipe,ModelPipes
 
-
-# dict of Dataframes
+# dict of Dataframes with properties
 class Dataset:
 	def __init__(self, dataset = {}):
 		self.dataset = dataset
 		self.folds_dates = []
-
+		
 	# methods to behave like dict
 	def add(self, key, item: pd.DataFrame):
 		if not isinstance(item, ModelWrapper):
@@ -65,28 +66,29 @@ class Dataset:
 		self.folds_dates = [(fold[0], fold[-1]) for fold in idx_folds]
 		return self
 
-	def get_train(self) -> Elements:
+	def set_train(self, model_pipes: ModelPipes):
 		'''
-		Get all data as training data
+		Set the training data in the model_pipes
 		'''
-		elements = Elements()
+		assert self.keys()==model_pipes.keys(),"dataset and model_pipes must have the same keys"
 		for key, df in self.items():
 			# get arrays
 			x = df.iloc[:, df.columns.str.startswith(FEATURE_PREFIX)].values
 			y = df.iloc[:, df.columns.str.startswith(TARGET_PREFIX)].values
 			x_cols,y_cols=self.get_xy_cols(df)
-			elements[key]=Element(
-								x, 
-								y, 
-								x, 
-								y, 
-								df.index, 
-								x_cols, 
-								y_cols,
-								key, 
-								)							
-		return elements
+			model_pipes[key].set_cols(x_cols,y_cols).set_train_data(x_train=x, y_train=y, copy_array = True)
+		return model_pipes
 
+	def set_test(self, model_pipes: ModelPipes):
+		# maybe this can be relaxed??
+		assert self.keys()==model_pipes.keys(),"dataset and model_pipes must have the same keys"
+		for key, df in self.items():
+			# get arrays
+			x = df.iloc[:, df.columns.str.startswith(FEATURE_PREFIX)].values
+			y = df.iloc[:, df.columns.str.startswith(TARGET_PREFIX)].values
+			x_cols,y_cols=self.get_xy_cols(df)
+			model_pipes[key].check_cols(x_cols,y_cols).set_test_data(x_test=x, y_test=y, ts=df.index, copy_array = True)		
+		return model_pipes
 
 	def _slice_segment(self, df, burn_fraction, min_burn_points):
 		if df.empty:
@@ -109,10 +111,14 @@ class Dataset:
 		a, b = np.random.randint(max(min_burn_points, 1), max(int(ar.size * burn_fraction), min_burn_points + 1), size=2)
 		return ar[a:-b]
 	
-	def get_train_test_elements(self, test_index: int, burn_fraction: float = 0.1, min_burn_points: int = 1, seq_path: bool = False) -> Elements:
+	def set_train_test_fold(
+							self, 
+							model_pipes: ModelPipes, 
+							test_index: int, 
+							burn_fraction: float = 0.1, 
+							min_burn_points: int = 1, 
+							seq_path: bool = False) -> ModelPipes:
 		
-		elements = Elements()  # Store splits by name
-
 		if seq_path and test_index == 0:
 			raise ValueError("Cannot start at fold 0 when path is sequential")
 		if self.folds_dates is None:
