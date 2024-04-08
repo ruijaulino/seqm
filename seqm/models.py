@@ -4,9 +4,37 @@ import matplotlib.pyplot as plt
 from scipy.stats import invwishart
 import tqdm
 from numba import jit
+from abc import ABC, abstractmethod
 
 
 # TEMPLATE
+
+
+class BaseModel(ABC):
+	
+	@abstractmethod
+	def estimate(self,y: np.ndarray, x: np.ndarray):
+		"""Subclasses must implement this method"""
+		pass
+
+	@abstractmethod
+	def get_weight(self,xq: np.ndarray) -> np.ndarray:
+		"""Subclasses must implement this method"""
+		pass
+	
+	@abstractmethod
+	def inverse_transform(self,arr: np.ndarray) -> np.ndarray:
+		"""Subclasses must implement this method"""
+		pass
+
+	@abstractmethod
+	def pw(self, arr: np.ndarray) -> float:
+		"""Subclasses must implement this method"""
+		pass
+
+
+
+
 class TemplateModel(object):	
 	
 	def __init__(self,*args,**kwargs):

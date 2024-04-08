@@ -6,6 +6,10 @@ from abc import ABC, abstractmethod
 class BaseTransform(ABC):
 	
 	@abstractmethod
+	def view(self) -> None:
+		pass
+
+	@abstractmethod
 	def fit(self,arr: np.ndarray) -> 'BaseTransform':
 		"""Subclasses must implement this method"""
 		pass
@@ -28,6 +32,8 @@ class BaseTransform(ABC):
 class IdleTransform(BaseTransform):
 	def __init__(self):
 		pass		
+	def view(self):
+		print('** IdleTransform **')		
 	def pw(self,y):
 		return 1	
 	def fit(self,data):
@@ -41,6 +47,11 @@ class MeanScaleTransform(BaseTransform):
 	def __init__(self):
 		self.mean = None
 		self.std = None		
+
+	def view(self):
+		print('** MeanScaleTransform **')
+		print('Mean: ', self.mean)
+		print('Scale: ', self.std)
 
 	def pw(self,data):
 		return np.sqrt(np.sum(np.power(1/self.std,2)))
@@ -67,6 +78,10 @@ class ScaleTransform(BaseTransform):
 	def __init__(self):
 		self.std = None		
 
+	def view(self):
+		print('** ScaleTransform **')
+		print('Scale: ', self.std)
+
 	def pw(self,data):
 		return np.sqrt(np.sum(np.power(1/self.std,2)))
 	
@@ -91,6 +106,10 @@ class RollPWScaleTransform(BaseTransform):
 		self.window = window
 		self.delay = delay
 		self.std = None		
+
+	def view(self):
+		print('** RollPWScaleTransform **')
+		print('Fixed Scale: ', self.std)
 
 	def pw(self,data):
 		if data.shape[0] > self.window:
