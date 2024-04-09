@@ -207,7 +207,7 @@ class Dataset:
 		self.split_dates(k_folds)			
 		start_fold = max(1, start_fold) if seq_path else start_fold		
 		paths = []
-		for m in range(n_paths):#tqdm.tqdm(range(n_paths)):
+		for m in tqdm.tqdm(range(n_paths)):
 			path=Path()
 			for fold_index in range(start_fold, k_folds):			
 				# make a copy of the original model_pipes
