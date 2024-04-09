@@ -114,7 +114,7 @@ class ModelPipe:
 		return self.y_transform.transform(y)
 
 	# estimate model
-	def estimate(self, x, y, **kwargs):
+	def estimate(self, **kwargs):
 		"""Train the model using the training data contained within this DataElement."""
 		# self.fit_x_transform(x).fit_y_transform(y)
 		# x=self.transform_x(x)
@@ -193,9 +193,12 @@ class ModelPipe:
 
 # dict of ModelWrappers
 class ModelPipes:
-	def __init__(self, model = None):
-		# model to be used when we are sharing the model
-		self.model = copy.deepcopy(model)
+
+	def __init__(self, master_model = None):
+		# if a master model is defined it is trained with 
+		# all training data and set on all individual pipes
+		# as it's model
+		self.master_model = copy.deepcopy(master_model)
 		self.models = {}
 
 	def add(self, key, item: ModelPipe):
@@ -250,9 +253,9 @@ class ModelPipes:
 				return False
 		return True
 
-	def estimate(self,share_model = True):
+	def estimate(self):
 		
-		if share_model:
+		if self.master_model is not None:
 			# if the model is shared then we train a single model
 			# on all data joined
 			# it is assumed that the individual model pipes
@@ -260,9 +263,9 @@ class ModelPipes:
 
 			x = np.vstack([e.x_train for k,e in self.items()])
 			y = np.vstack([e.y_train for k,e in self.items()])
-			self.model.estimate(**{'x':x,'y':y})
+			self.master_model.estimate(**{'x':x,'y':y})
 			# set individual copies			
-			for k,e in self.items(): e.set_model(self.model)
+			for k,e in self.items(): e.set_model(self.master_model)
 		else:
 			for k,m in self.items():m.estimate()
 		return self

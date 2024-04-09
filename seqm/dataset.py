@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from typing import List, Union, Dict
 import copy
-
+import tqdm
 try:
 	from .models import ConditionalGaussian
 	from .constants import *
@@ -194,8 +194,8 @@ class Dataset:
 			n_paths=4, 
 			burn_fraction=0.1, 
 			min_burn_points=3, 
-			share_model=True, 
-			view_models=False
+			view_models=False,
+			**kwargs
 			):
 		'''
 		each path generates a dict like
@@ -218,7 +218,7 @@ class Dataset:
 															min_burn_points=min_burn_points,
 															seq_path=seq_path
 															)			
-				local_model_pipes.estimate(share_model = share_model)
+				local_model_pipes.estimate()
 				local_model_pipes.evaluate()
 				path.add(local_model_pipes)
 			path.join()

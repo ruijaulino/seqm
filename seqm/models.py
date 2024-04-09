@@ -1159,10 +1159,6 @@ class SameConditionalGaussianMixture(object):
 		return w
 
 
-
-
-
-
 # n_states,n_gibbs=1000,f_burn=0.1,max_k=0.25,kelly_std=2,max_w=1
 class StateConditionalGaussianMixture(object):
 	def __init__(self,n_states,n_gibbs=None,f_burn=0.1,max_k=0.25,min_points=10,kelly_std=2,max_w=1):
