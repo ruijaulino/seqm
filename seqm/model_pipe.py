@@ -49,16 +49,24 @@ class ModelPipe:
 			print('- Weight')
 			print(self.get_pw())
 
-	def get_s(self):
+	def get_s_df(self):
 		if self.s is not None:
 			return pd.DataFrame(self.s,columns=[STRATEGY_COLUMN],index=self.ts)
 		else:
-			return pd.DataFrame(columns=[STRATEGY_COLUMN])
-	def get_w(self):
-		return pd.DataFrame(self.w,columns=[WEIGHT_PREFIX_COLUMNS+c for c in self.y_cols],index=self.ts)
-		
-	def get_pw(self):
-		return pd.DataFrame(self.pw,columns=[PORTFOLIO_WEIGHT_COLUMN],index=self.ts)
+			print('ola none s')
+			return None
+	def get_w_df(self):
+		if self.w is not None:
+			return pd.DataFrame(self.w,columns=[WEIGHT_PREFIX_COLUMNS+c for c in self.y_cols],index=self.ts)
+		else:
+			print('ola none w')
+			return None	
+	def get_pw_df(self):
+		if self.pw is not None:
+			return pd.DataFrame(self.pw,columns=[PORTFOLIO_WEIGHT_COLUMN],index=self.ts)
+		else:
+			print('ola none pw')
+			return None
 
 	def view(self):
 		print()
@@ -162,27 +170,26 @@ class ModelPipe:
 
 	def evaluate(self):
 		"""Evaluate the model using the test data and return performance metrics."""
-		if self.y_test is not None:
-			n = self.y_test.shape[0]
-			p = self.y_test.shape[1]
-			self.s = np.zeros(n, dtype=np.float64)
-			self.w = np.zeros((n, p), dtype=np.float64)
-			self.pw = np.ones(n, dtype=np.float64)
+		n = self.y_test.shape[0]
+		p = self.y_test.shape[1]
+		self.s = np.zeros(n, dtype=np.float64)
+		self.w = np.zeros((n, p), dtype=np.float64)
+		self.pw = np.ones(n, dtype=np.float64)
 
-			for i in range(n):
-				# normalize y for input (make copy of y)
-				# make sure this array does not get modified
-				# the x input is already normalized!
-				w = self.get_weight(
-									xq = self.x_test[i], 
-									x = self.x_test[:i], 
-									y = self.y_test[:i], 
-									apply_transform_x = True, 
-									apply_transform_y = True
-									)
-				self.w[i] = w
-				self.s[i] = np.dot(self.y_test[i], w)
-				self.pw[i] = self.get_pw(self.y_test[:i])
+		for i in range(n):
+			# normalize y for input (make copy of y)
+			# make sure this array does not get modified
+			# the x input is already normalized!
+			w = self.get_weight(
+								xq = self.x_test[i], 
+								x = self.x_test[:i], 
+								y = self.y_test[:i], 
+								apply_transform_x = True, 
+								apply_transform_y = True
+								)
+			self.w[i] = w
+			self.s[i] = np.dot(self.y_test[i], w)
+			self.pw[i] = self.get_pw(self.y_test[:i])
 
 # dict of ModelWrappers
 class ModelPipes:
@@ -219,8 +226,25 @@ class ModelPipes:
 	def items(self):
 		return self.models.items()
 
+	def remove(self, key):
+		"""
+		Removes a ModelPipe instance associated with the specified key.
+
+		Parameters:
+		- key: The key of the ModelPipe instance to be removed.
+
+		Raises:
+		- KeyError: If the key is not found in the models.
+		"""
+		if key in self.models:
+			del self.models[key]
+		else:
+			pass
+
 	# more methods
-	def has_keys(self,keys:list):
+	def has_keys(self,keys:Union[list,str]):
+		if isinstance(keys,str):
+			keys=[keys]
 		for key in keys:
 			if key not in self.keys():
 				return False
@@ -234,9 +258,8 @@ class ModelPipes:
 			# it is assumed that the individual model pipes
 			# have suitable normalizations
 
-			# TO DO: WHY CAN x_train BE None WHEN DOING CVBT??
-			x = np.vstack([e.x_train for k,e in self.items() if e.x_train is not None])
-			y = np.vstack([e.y_train for k,e in self.items() if e.y_train is not None])
+			x = np.vstack([e.x_train for k,e in self.items()])
+			y = np.vstack([e.y_train for k,e in self.items()])
 			self.model.estimate(**{'x':x,'y':y})
 			# set individual copies			
 			for k,e in self.items(): e.set_model(self.model)
@@ -259,10 +282,15 @@ class Path:
 
 	@property
 	def keys(self):
-		if len(self.model_pipes)!=0:
-			return list(self.model_pipes.keys())
-		else:
-			return []
+		out = []
+		for e in self.model_pipes: 
+			out+=list(e.keys())
+		out=list(set(out))
+		return out
+		#if len(self.model_pipes)!=0:
+		#	return list(self.model_pipes[0].keys())
+		#else:
+		# 	return []
 
 	def add(self,item:ModelPipes):
 		if isinstance(item, ModelPipes):
@@ -291,17 +319,16 @@ class Path:
 			self.w.update({key:[]})
 			self.pw.update({key:[]})
 		# iterate model_pipes
-		for es in self:
+		for mps in self:
 			tmp={}
 			# iterate series in element
-			for e in es:
-				if e.s is not None:
-					# get performance dataframe
-					self.s[e.key].append(e.get_s())
-					# get weight dataframe
-					self.w[e.key].append(e.get_w())
-					# get portfolio weight
-					self.pw[e.key].append(e.get_pw())
+			for k,mp in mps.items():
+				# get performance dataframe
+				self.s[k].append(mp.get_s_df())
+				# get weight dataframe
+				self.w[k].append(mp.get_w_df())
+				# get portfolio weight
+				self.pw[k].append(mp.get_pw_df())
 		for k,v in self.s.items():
 			tmp=pd.concat(self.s[k],axis=0)
 			tmp=tmp.sort_index()

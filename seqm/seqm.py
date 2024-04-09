@@ -36,16 +36,19 @@ def train(dataset: Dataset, model_pipes:ModelPipes, share_model = True):
 
 	return model_pipes
 
-def test(dataset: Dataset, model_pipes: ModelPipes):
+def test(dataset: Dataset, model_pipes: ModelPipes):	
+	path=Path()
 	model_pipes = dataset.set_test(model_pipes)
 	model_pipes.evaluate()
-	for k,e in model_pipes.items():
-		plt.plot(np.cumsum(e.s))
-		plt.show()	
-
-def live(dataset: Dataset):
+	path.add(model_pipes)
+	path.join()
+	paths=[path.get_results()]
+	return paths
+	
+def live(dataset: Dataset, model_pipes: ModelPipes):
 	# just evaluate last point
-	pass
+	
+	return dataset.live(model_pipes)
 
 def cvbt(
 		dataset:Dataset, 
@@ -69,7 +72,7 @@ def cvbt(
 	dataset.split_dates(k_folds)			
 	start_fold = max(1, start_fold) if seq_path else start_fold		
 	paths = []
-	for m in tqdm.tqdm(range(n_paths)):
+	for m in range(n_paths):#tqdm.tqdm(range(n_paths)):
 		path=Path()
 		for fold_index in range(start_fold, k_folds):			
 			# make a copy of the original model_pipes
@@ -79,14 +82,11 @@ def cvbt(
 														burn_fraction=burn_fraction,
 														min_burn_points=min_burn_points,
 														seq_path=seq_path
-														)
-			
+														)			
 			local_model_pipes.estimate(share_model = share_model)
 			local_model_pipes.evaluate()
 			path.add(local_model_pipes)
 		path.join()
-		print(path)
-		print(sdfsdf)
 		paths.append(path.get_results())
 	return paths
 
@@ -101,7 +101,7 @@ def generate_lr(n=1000,a=0,b=0.1,start_date='2000-01-01'):
 	data=pd.DataFrame(np.hstack((y[:,None],x[:,None])),columns=['y1','x1'],index=dates)
 	return data
 
-def run_train_test():
+def run_train_test_live():
 	data1=generate_lr(n=100,a=0,b=0.1,start_date='2000-01-01')
 	data2=generate_lr(n=70,a=0,b=0.1,start_date='2000-06-01')
 	data3=generate_lr(n=150,a=0,b=0.1,start_date='2001-01-01')
@@ -131,12 +131,24 @@ def run_train_test():
 	
 	# create dataset
 	dataset=Dataset({'dataset 1':data1,'dataset 2':data2})
-	test(dataset, model_pipes)
+	paths=test(dataset, copy.deepcopy(model_pipes))
+	# portfolio_post_process(paths)
+
+	print('----------')
+	print('RUN LIVE')
+	# GET THE CURRENT WEIGHTS!
+	out=live(dataset, model_pipes)
+	print(out)
+
+	
+
+
+
 
 def run_cvbt():
-	data1=generate_lr(n=100,a=0,b=0.1,start_date='2000-01-01')
-	data2=generate_lr(n=70,a=0,b=0.1,start_date='2000-06-01')
-	data3=generate_lr(n=150,a=0,b=0.1,start_date='2001-01-01')
+	data1=generate_lr(n=1000,a=0,b=0.1,start_date='2000-01-01')
+	data2=generate_lr(n=700,a=0,b=0.1,start_date='2000-06-01')
+	data3=generate_lr(n=1500,a=0,b=0.1,start_date='2001-01-01')
 	
 	# create dataset
 	dataset=Dataset({'dataset 1':data1,'dataset 2':data2})	
@@ -149,7 +161,7 @@ def run_cvbt():
 		model_pipe = ModelPipe(x_transform = RollPWScaleTransform(window=10),y_transform = RollPWScaleTransform(window=10))
 		model_pipes[key] = model_pipe
 
-	cvbt(
+	paths=cvbt(
 		dataset, 
 		model_pipes, 
 		k_folds=4, 
@@ -161,12 +173,13 @@ def run_cvbt():
 		share_model=True, 
 		view_models=False
 		)
+	portfolio_post_process(paths)
 
 if __name__=='__main__':
 
-	run_cvbt()
+	# run_cvbt()
 
-	# run_train_test()
+	run_train_test_live()
 
 
 
