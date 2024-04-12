@@ -113,13 +113,33 @@ def visualize_weights(w,ts,cols=None):
 			plt.grid(True)
 			plt.show()	
 
-def post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,key=None):
+
+def filter_paths(paths:List[Dict[str,pd.DataFrame]],start_date:str = '',end_date:str = ''):
+	# make a copy
+	if start_date == '' and end_date == '': return paths
+	f_paths=[]
+	for elem in paths:
+		tmp={}
+		for k,df in elem.items():
+			f_df = df
+			if start_date != '':
+				f_df = f_df[f_df.index > start_date]
+			if end_date != '':
+				f_df = f_df[f_df.index < end_date]
+			tmp.update({k:f_df})
+		f_paths.append(tmp)
+	return f_paths
+
+
+def post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,key=None,start_date='',end_date=''):
 	'''
 	paths: list of dict like [{'dataset 1':df,'dataset 2':df},{'dataset 1':df,'dataset 2':df},...]
 		each element of the paths list is the result for a given path
 		for each path (element of the list) we have the results for the different datasets
-
 	'''
+	
+	paths = filter_paths(paths,start_date,end_date)
+
 	if len(paths) == 0:
 		print('No paths to process!')
 		return
@@ -130,6 +150,7 @@ def post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr
 	# get and joint results for key
 	s=[]
 	w=[]	
+
 	for path in paths:
 		df=path.get(key)
 		s.append(df[[STRATEGY_COLUMN]].values)
@@ -157,7 +178,10 @@ def post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr
 	performance_summary(s,sr_mult,pct_fee=pct_fee)
 	
 
-def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,view_weights=True,use_pw=True,multiplier=1):
+def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,view_weights=True,use_pw=True,multiplier=1,start_date='',end_date=''):
+
+	paths = filter_paths(paths,start_date,end_date)
+
 
 	keys = [k for k in paths[0]]
 

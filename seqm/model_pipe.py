@@ -352,6 +352,4 @@ class Path:
 		self.results={}
 		for key in self.keys:			
 			self.results.update({key:pd.concat([self.s.get(key),self.w.get(key),self.pw.get(key)],axis=1)})
-		if len(self.keys)==1:
-			self.results=self.results.get(self.keys[0])
 		return self.results		
