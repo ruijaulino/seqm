@@ -16,21 +16,6 @@ except ImportError:
 
 # class with a model and a transformer
 # train, test, live of model
-
-class Arrays:
-	def __init__(self, y, x=None, ts=None, copy = True):
-		self.y = y
-		self.x = x
-		self.ts = ts
-		if self.ts is None: self.ts = np.arange(self.y.size, dtype=int)
-
-	@property
-	def has_x(self):
-		return True if self.x is not None else False
-	
-	def get_estimate_input(self):
-		return {'x':self.x,'y':self.y}
-
 class ModelPipe:
 	
 	def __init__(
@@ -46,7 +31,6 @@ class ModelPipe:
 		self.key = key or 'Dataset'
 		self.s,self.w,self.pw = None,None,None
 		self.x_cols,self.y_cols = None,None
-		self.arrays_train,self.arrays_test = None,None
 		self.x_train,self.y_train = None,None
 		self.x_test,self.y_test = None,None
 		self.ts = None
@@ -106,13 +90,18 @@ class ModelPipe:
 		self.y_transform=y_transform
 		return self
 
+	def fit_transform(self):
+		self.fit_x_transform(self.x_train).fit_y_transform(self.y_train)
+		self.x_train=self.transform_x(self.x_train)
+		self.y_train=self.transform_y(self.y_train)
+
 	# fit transform
-	def fit_x_transform(self):
-		if self.arrays_train.has_x: self.x_transform.fit(self.arrays_train.x)
+	def fit_x_transform(self,x_train):
+		self.x_transform.fit(x_train)
 		return self
 
-	def fit_y_transform(self):
-		self.y_transform.fit(self.arrays_train.y)
+	def fit_y_transform(self,y_train):
+		self.y_transform.fit(y_train)
 		return self
 
 	# apply transform
@@ -124,18 +113,13 @@ class ModelPipe:
 		if copy_array: y = np.array(y)
 		return self.y_transform.transform(y)
 
-	def fit_transform(self):
-		self.fit_x_transform().fit_y_transform()
-		if self.arrays_train.has_x: self.arrays_train.x = self.transform_x(self.arrays_train.x)
-		self.arrays_train.y = self.transform_y(self.arrays_train.y)
-
 	# estimate model
 	def estimate(self, **kwargs):
 		"""Train the model using the training data contained within this DataElement."""
 		# self.fit_x_transform(x).fit_y_transform(y)
 		# x=self.transform_x(x)
 		# y=self.transform_y(y)
-		self.model.estimate(**self.arrays_train.get_estimate_input())
+		self.model.estimate(x=self.x_train, y=self.y_train)
 		return self
 
 	# --------------------------
@@ -152,15 +136,7 @@ class ModelPipe:
 		assert y_cols==self.y_cols,"y columns do not match the existent model pipe"
 		return self
 
-	def set_arrays_train(self,arrays: Arrays):
-		self.arrays_train = arrays
-		return self
-	
-	def set_arrays_test(self,arrays: Arrays):
-		self.arrays_test = arrays
-		return self
-
-	def set_train_data(self, x_train, y_train, copy_array = True):		
+	def set_train_data(self, x_train, y_train,copy_array = True):		
 		self.x_train = np.array(x_train) if copy_array else x_train
 		self.y_train = np.array(y_train) if copy_array else y_train
 		# when the train data is set, fit the transform
@@ -173,11 +149,6 @@ class ModelPipe:
 		self.ts = copy.deepcopy(ts) if copy_array else ts
 		# do not transform here training data to make
 		# the implementation more clear when testing
-		return self
-
-	def set_arrays(self, arrays_train, arrays_test):
-		self.set_arrays_train(arrays_train).set_arrays_test(arrays_test)
-		# self.set_train_data(x_train, y_train).set_test_data(x_test, y_test, ts)
 		return self
 
 	def set_data(self, x_train, y_train, x_test, y_test, ts):
@@ -289,20 +260,9 @@ class ModelPipes:
 			# on all data joined
 			# it is assumed that the individual model pipes
 			# have suitable normalizations
-			# x = []
-			# y = []
-			# for k,e in self.items():
-			# 	if e.x_train is not None: x.append(e.x_train)
-			# 	y.append(e.y_train)
-			# if len(x) != 0: 
-			# 	x = np.vstack(x)
-			# else:
-			# 	x=None
-			# y=np.vstack(y)
+
 			x = np.vstack([e.x_train for k,e in self.items()])
 			y = np.vstack([e.y_train for k,e in self.items()])
-			if x.shape[1] == 0:
-				x = None
 			self.master_model.estimate(**{'x':x,'y':y})
 			# set individual copies			
 			for k,e in self.items(): e.set_model(self.master_model)
