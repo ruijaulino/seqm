@@ -9,9 +9,11 @@ import copy
 
 try:
 	from .transform import BaseTransform,IdleTransform
+	from .arrays import Arrays
 	from .constants import *
 except ImportError:
 	from transform import BaseTransform,IdleTransform
+	from arrays import Arrays
 	from constants import *
 
 # class with a model and a transformer
@@ -33,6 +35,7 @@ class ModelPipe:
 		self.x_cols,self.y_cols = None,None
 		self.x_train,self.y_train = None,None
 		self.x_test,self.y_test = None,None
+		self.train_arrays,self.test_arrays = None,None
 		self.ts = None
 
 	def view(self):
@@ -51,19 +54,19 @@ class ModelPipe:
 
 	def get_s_df(self):
 		if self.s is not None:
-			return pd.DataFrame(self.s,columns=[STRATEGY_COLUMN],index=self.ts)
+			return pd.DataFrame(self.s,columns=[STRATEGY_COLUMN],index=self.test_arrays.ts)
 		else:
 			print('ola none s')
 			return None
 	def get_w_df(self):
 		if self.w is not None:
-			return pd.DataFrame(self.w,columns=[WEIGHT_PREFIX_COLUMNS+c for c in self.y_cols],index=self.ts)
+			return pd.DataFrame(self.w,columns=[WEIGHT_PREFIX_COLUMNS+c for c in self.test_arrays.y_cols],index=self.test_arrays.ts)
 		else:
 			print('ola none w')
 			return None	
 	def get_pw_df(self):
 		if self.pw is not None:
-			return pd.DataFrame(self.pw,columns=[PORTFOLIO_WEIGHT_COLUMN],index=self.ts)
+			return pd.DataFrame(self.pw,columns=[PORTFOLIO_WEIGHT_COLUMN],index=self.test_arrays.ts)
 		else:
 			print('ola none pw')
 			return None
@@ -91,17 +94,18 @@ class ModelPipe:
 		return self
 
 	def fit_transform(self):
-		self.fit_x_transform(self.x_train).fit_y_transform(self.y_train)
-		self.x_train=self.transform_x(self.x_train)
-		self.y_train=self.transform_y(self.y_train)
+		self.fit_x_transform().fit_y_transform()
+		# apply transform
+		if self.train_arrays.has_x: self.train_arrays.x = self.transform_x(self.train_arrays.x)
+		self.train_arrays.y = self.transform_y(self.train_arrays.y)
 
 	# fit transform
-	def fit_x_transform(self,x_train):
-		self.x_transform.fit(x_train)
+	def fit_x_transform(self):
+		if self.train_arrays.has_x: self.x_transform.fit(self.train_arrays.x)
 		return self
 
-	def fit_y_transform(self,y_train):
-		self.y_transform.fit(y_train)
+	def fit_y_transform(self):
+		self.y_transform.fit(self.train_arrays.y)
 		return self
 
 	# apply transform
@@ -112,6 +116,7 @@ class ModelPipe:
 	def transform_y(self, y, copy_array = True):
 		if copy_array: y = np.array(y)
 		return self.y_transform.transform(y)
+
 
 	# estimate model
 	def estimate(self, **kwargs):
@@ -127,6 +132,9 @@ class ModelPipe:
 	# --------------------------
 	# set data
 
+
+	# TO REMOVE
+	# ------------
 	def set_cols(self, x_cols:list, y_cols:list):
 		self.x_cols,self.y_cols = x_cols,y_cols
 		return self
@@ -154,24 +162,38 @@ class ModelPipe:
 	def set_data(self, x_train, y_train, x_test, y_test, ts):
 		self.set_train_data(x_train, y_train).set_test_data(x_test, y_test, ts)
 		return self
+	# -------
+
+	def set_train_arrays(self, arrays:Arrays):
+		self.train_arrays = arrays
+		self.fit_transform()
+		return self
+	def set_test_arrays(self, arrays:Arrays):
+		self.test_arrays = arrays
+		return self
+	def set_arrays(self, train_arrays:Arrays, test_arrays:Arrays):
+		self.set_train_arrays(train_arrays).set_test_arrays(test_arrays)
+		return self
+
 
 	# get weight
 	def get_weight(self, xq, x, y, apply_transform_x = True, apply_transform_y = True):
 		# process inputs
-		if apply_transform_y: y = self.transform_y(y,True)
+		if apply_transform_y: y = self.transform_y(y, True)
 		if x is not None:
-			if apply_transform_x: x = self.transform_x(x,True)
+			if apply_transform_x: x = self.transform_x(x, True)
 		if xq is not None:
-			if apply_transform_x: xq = self.transform_x(xq,True)
+			if apply_transform_x: xq = self.transform_x(xq, True)
 		return self.model.get_weight(**{'y': y, 'x': x, 'xq': xq})
+	
 	# get portfolio weights from the transform
 	def get_pw(self,y):
 		return self.y_transform.pw(y)		
 
 	def evaluate(self):
 		"""Evaluate the model using the test data and return performance metrics."""
-		n = self.y_test.shape[0]
-		p = self.y_test.shape[1]
+		n = self.test_arrays.y.shape[0]
+		p = self.test_arrays.y.shape[1]
 		self.s = np.zeros(n, dtype=np.float64)
 		self.w = np.zeros((n, p), dtype=np.float64)
 		self.pw = np.ones(n, dtype=np.float64)
@@ -180,16 +202,21 @@ class ModelPipe:
 			# normalize y for input (make copy of y)
 			# make sure this array does not get modified
 			# the x input is already normalized!
+			xq_ = None
+			x_ = None
+			if self.test_arrays.has_x:
+				xq_ = self.test_arrays.x[i]
+				x_ = self.test_arrays.x[:i]
 			w = self.get_weight(
-								xq = self.x_test[i], 
-								x = self.x_test[:i], 
-								y = self.y_test[:i], 
+								xq = xq_, 
+								x = x_, 
+								y = self.test_arrays.y[:i], 
 								apply_transform_x = True, 
 								apply_transform_y = True
 								)
 			self.w[i] = w
-			self.s[i] = np.dot(self.y_test[i], w)
-			self.pw[i] = self.get_pw(self.y_test[:i])
+			self.s[i] = np.dot(self.test_arrays.y[i], w)
+			self.pw[i] = self.get_pw(self.test_arrays.y[:i])
 
 # dict of ModelWrappers
 class ModelPipes:
@@ -260,9 +287,8 @@ class ModelPipes:
 			# on all data joined
 			# it is assumed that the individual model pipes
 			# have suitable normalizations
-
-			x = np.vstack([e.x_train for k,e in self.items()])
-			y = np.vstack([e.y_train for k,e in self.items()])
+			x = np.vstack([e.train_arrays.x for k,e in self.items()])
+			y = np.vstack([e.train_arrays.y for k,e in self.items()])
 			self.master_model.estimate(**{'x':x,'y':y})
 			# set individual copies			
 			for k,e in self.items(): e.set_model(self.master_model)
