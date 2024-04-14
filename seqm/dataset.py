@@ -184,7 +184,7 @@ class Dataset:
 		# associate model pipes with the dataset
 		model_pipes = self.set_train_on_pipes(model_pipes)
 		# estimate models
-		model_pipes.estimate(share_model = share_model)
+		model_pipes.estimate()
 		return model_pipes
 
 	def test(self, model_pipes: ModelPipes):	
@@ -204,12 +204,30 @@ class Dataset:
 				# for a live application it makes sense that the last observation of 
 				# y has nan because it is not available yet!
 				# assume here that the data has that format
-				x = df.iloc[:, df.columns.str.startswith(FEATURE_PREFIX)].values
-				y = df.iloc[:, df.columns.str.startswith(TARGET_PREFIX)].values
-				x_cols,y_cols=self.get_xy_cols(df)
-				model_pipes[key].check_cols(x_cols,y_cols)
-				w = model_pipes[key].get_weight(xq = x[-1], x=x[:-1], y=y[:-1], apply_transform_x = True, apply_transform_y = True)
-				pw = model_pipes[key].get_pw(y[:-1])		
+				
+				arrays = Arrays()
+				arrays.from_df(df)
+
+				#x = df.iloc[:, df.columns.str.startswith(FEATURE_PREFIX)].values
+				#y = df.iloc[:, df.columns.str.startswith(TARGET_PREFIX)].values
+				#x_cols,y_cols=self.get_xy_cols(df)
+				
+				# model_pipes[key].check_cols(x_cols,y_cols)
+				
+				xq_ = None
+				x_ = None
+				if arrays.has_x:
+					xq_ = arrays.x[-1]
+					x_ = arrays.x[:-1]
+				w = model_pipes[key].get_weight(
+										xq = xq_, 
+										x = x_, 
+										y = arrays.y[:-1], 
+										apply_transform_x = True, 
+										apply_transform_y = True
+										)
+
+				pw = model_pipes[key].get_pw(arrays.y[:-1])		
 				out.update({key:{'w':w,'pw':pw}})		
 		return out
 
