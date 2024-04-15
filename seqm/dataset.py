@@ -8,6 +8,7 @@ import tqdm
 try:
 	from .models import ConditionalGaussian
 	from .arrays import Arrays
+	from .uts import add_unix_timestamp,unix_timestamp_to_index
 	from .constants import *
 	from .model_pipe import ModelPipe,ModelPipes,Path
 	from .transform import RollPWScaleTransform
@@ -15,23 +16,25 @@ try:
 except ImportError:
 	from models import ConditionalGaussian
 	from arrays import Arrays
+	from uts import add_unix_timestamp,unix_timestamp_to_index
 	from constants import *
 	from model_pipe import ModelPipe,ModelPipes,Path
 	from transform import RollPWScaleTransform
 	from post_process import post_process,portfolio_post_process
 
-
 # dict of Dataframes with properties
 class Dataset:
 	def __init__(self, dataset = {}):
 		self.dataset = dataset
+		# add unix timestamp when data is inserted
+		for k,v in self.dataset.items():v=add_unix_timestamp(v)
 		self.folds_dates = []
 		
 	# methods to behave like dict
 	def add(self, key, item: pd.DataFrame):
 		if not isinstance(item, ModelWrapper):
 			raise TypeError("Item must be an instance of pd.DataFrame")
-		self.dataset[key] = copy.deepcopy(item)
+		self.dataset[key] = copy.deepcopy(add_unix_timestamp(item))
 
 	def __getitem__(self, key):
 		return self.dataset[key]
@@ -226,7 +229,7 @@ class Dataset:
 										xq = xq_, 
 										x = x_, 
 										y = arrays.y[:-1], 
-										z = z_
+										z = z_,
 										apply_transform_x = True, 
 										apply_transform_y = True
 										)
@@ -282,7 +285,7 @@ def generate_lr(n=1000,a=0,b=0.1,start_date='2000-01-01'):
 	a=0
 	b=0.1
 	y=a+b*x+np.random.normal(0,0.01,n)
-	dates=pd.date_range(start_date,periods=n,freq='B')
+	dates=pd.date_range(start_date,periods=n,freq='D')
 	data=pd.DataFrame(np.hstack((y[:,None],x[:,None])),columns=['y1','x1'],index=dates)
 	return data
 
