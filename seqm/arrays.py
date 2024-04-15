@@ -16,9 +16,10 @@ def get_df_cols(df):
 	return x_cols, y_cols
 
 class Arrays:
-	def __init__(self, y = None, x = None, ts = None, x_cols = None, y_cols = None):
+	def __init__(self, y = None, x = None, z = None, ts = None, x_cols = None, y_cols = None):
 		self.y = y
 		self.x = x
+		self.z = z
 		self.ts = ts
 		self.x_cols = x_cols
 		self.y_cols = y_cols
@@ -28,6 +29,10 @@ class Arrays:
 	@property
 	def has_x(self):
 		return self.x is not None
+
+	@property
+	def has_z(self):
+		return self.z is not None
 
 	def view(self):
 		print('** Arrays **')
@@ -47,6 +52,8 @@ class Arrays:
 		self.empty = False
 		self.x = df.iloc[:, df.columns.str.startswith(FEATURE_PREFIX)].values
 		if self.x.shape[1] == 0: self.x = None
+		self.z = df.iloc[:, [e==STATE_COL for e in df.columns.tolist()]].values
+		if self.z.shape[1] == 0: self.z = None
 		self.y = df.iloc[:, df.columns.str.startswith(TARGET_PREFIX)].values
 		assert self.y.shape[1] != 0, "no target columns"
 		if add_ts: self.ts = df.index
@@ -58,7 +65,8 @@ class Arrays:
 			idx = np.arange(self.y.shape[0])
 			idx = self._random_subsequence(idx, burn_fraction, min_burn_points)
 			self.y = self.y[idx]
-			if self.x is not None: self.x = self.x[idx]
+			if self.has_x: self.x = self.x[idx]
+			if self.has_z: self.z = self.z[idx]
 		return self
 
 	@staticmethod
@@ -69,6 +77,7 @@ class Arrays:
 	def _copy(self, arrays:'Arrays'):
 		self.y = arrays.y
 		self.x = arrays.x
+		self.z = arrays.z
 		self.ts = arrays.ts
 		self.x_cols = arrays.x_cols
 		self.y_cols = arrays.y_cols
@@ -86,11 +95,12 @@ class Arrays:
 		self.check_cols(arrays)
 		# ts is not stacked as this is used to concat training data
 		self.y = np.vstack((self.y,arrays.y))		
-		if self.x is not None:
-			self.x = np.vstack((self.x,arrays.x))
+		if self.has_x: self.x = np.vstack((self.x,arrays.x))
+		if self.has_z: self.z = np.vstack((self.z,arrays.z))
 		return self		
 
 	def check_cols(self,arrays:'Arrays'):
 		assert self.x_cols == arrays.x_cols,"x_cols are different"
 		assert self.y_cols == arrays.y_cols,"x_cols are different"
+		assert self.has_z == arrays.has_z,"z is different"
 		return self

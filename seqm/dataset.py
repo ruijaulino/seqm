@@ -216,13 +216,17 @@ class Dataset:
 				
 				xq_ = None
 				x_ = None
+				z_ = None
 				if arrays.has_x:
 					xq_ = arrays.x[-1]
 					x_ = arrays.x[:-1]
+				if arrays.has_z:
+					z_ = arrays.z[-1]
 				w = model_pipes[key].get_weight(
 										xq = xq_, 
 										x = x_, 
 										y = arrays.y[:-1], 
+										z = z_
 										apply_transform_x = True, 
 										apply_transform_y = True
 										)

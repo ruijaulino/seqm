@@ -353,14 +353,18 @@ class StateGaussian(object):
 			print()
 			print()
 
-	def estimate(self,y,z=None,**kwargs):
+	def estimate(self,y,z,**kwargs):
 
 		self.max_w_norm=0
 		self.p=y.shape[1]
 		n=y.shape[0]
-		if z is None:
-			z=np.zeros(n,dtype=int)
-		assert z.ndim==1,"z must be a vector"
+		
+		if z.ndim!=1:
+			z=z[:,None]
+
+		#if z is None:
+		#	z=np.zeros(n,dtype=int)
+		# assert z.ndim==1,"z must be a vector"
 		z=np.array(z,dtype=int)
 		uz=np.unique(z)
 		for e in uz:

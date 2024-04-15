@@ -124,7 +124,8 @@ class ModelPipe:
 		# self.fit_x_transform(x).fit_y_transform(y)
 		# x=self.transform_x(x)
 		# y=self.transform_y(y)
-		self.model.estimate(x=self.x_train, y=self.y_train)
+		# self.model.estimate(x=self.train, y=self.y_train)
+		self.model.estimate( **{'x' : self.train_arrays.x, 'y' : self.train_arrays.y, 'z' : self.train_arrays.z} )
 		return self
 
 	# --------------------------
@@ -177,14 +178,14 @@ class ModelPipe:
 
 
 	# get weight
-	def get_weight(self, xq, x, y, apply_transform_x = True, apply_transform_y = True):
+	def get_weight(self, xq, x, y, z, apply_transform_x = True, apply_transform_y = True):
 		# process inputs
 		if apply_transform_y: y = self.transform_y(y, True)
 		if x is not None:
 			if apply_transform_x: x = self.transform_x(x, True)
 		if xq is not None:
 			if apply_transform_x: xq = self.transform_x(xq, True)
-		return self.model.get_weight(**{'y': y, 'x': x, 'xq': xq})
+		return self.model.get_weight(**{'y': y, 'x': x, 'xq': xq, 'z':z})
 	
 	# get portfolio weights from the transform
 	def get_pw(self,y):
@@ -204,13 +205,17 @@ class ModelPipe:
 			# the x input is already normalized!
 			xq_ = None
 			x_ = None
+			z_ = None
 			if self.test_arrays.has_x:
 				xq_ = self.test_arrays.x[i]
 				x_ = self.test_arrays.x[:i]
+			if self.test_arrays.has_z:
+				z_ = self.test_arrays.z[i]
 			w = self.get_weight(
 								xq = xq_, 
 								x = x_, 
 								y = self.test_arrays.y[:i], 
+								z = z_,
 								apply_transform_x = True, 
 								apply_transform_y = True
 								)
@@ -287,9 +292,16 @@ class ModelPipes:
 			# on all data joined
 			# it is assumed that the individual model pipes
 			# have suitable normalizations
-			x = np.vstack([e.train_arrays.x for k,e in self.items()])
-			y = np.vstack([e.train_arrays.y for k,e in self.items()])
-			self.master_model.estimate(**{'x':x,'y':y})
+			# maybe this could be a method...
+			arrays = None
+			for k,e in self.items():
+				if arrays is None:
+					arrays = copy.deepcopy(e.train_arrays)
+				else:
+					arrays.stack(e.train_arrays)					
+			# x = np.vstack([e.train_arrays.x for k,e in self.items()])
+			# y = np.vstack([e.train_arrays.y for k,e in self.items()])
+			self.master_model.estimate(**{'x':arrays.x,'y':arrays.y,'z':arrays.z})
 			# set individual copies			
 			for k,e in self.items(): e.set_model(self.master_model)
 		else:
