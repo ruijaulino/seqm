@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 
-
 def linear(n=1000,a=0,b=0.1,start_date='2000-01-01'):
 	x=np.random.normal(0,0.01,n)
 	y=a+b*x+np.random.normal(0,0.01,n)

@@ -9,11 +9,9 @@ import copy
 
 try:
 	from .transform import BaseTransform,IdleTransform
-	from .arrays import Arrays
 	from .constants import *
 except ImportError:
 	from transform import BaseTransform,IdleTransform
-	from arrays import Arrays
 	from constants import *
 
 # class with a model and a transformer
@@ -32,83 +30,73 @@ class ModelPipe:
 		self.y_transform = copy.deepcopy(y_transform) if y_transform is not None else IdleTransform()  # Store the class, not an instance
 		self.key = key or 'Dataset'
 		self.s,self.w,self.pw = None,None,None
-		self.x_cols,self.y_cols = None,None
-		self.x_train,self.y_train = None,None
-		self.x_test,self.y_test = None,None
-		self.train_arrays,self.test_arrays = None,None
-		self.ts = None
-
-	def view(self):
-		print('** Element **')
-		if self.x_train is not None:
-			print('- Train')
-			print(pd.DataFrame(np.hstack((self.x_train,self.y_train)),columns=self.x_cols+self.y_cols))
-		if self.x_test is not None:
-			print('- Test')
-			print(pd.DataFrame(np.hstack((self.x_test,self.y_test)),columns=self.x_cols+self.y_cols,index=self.ts))
-		if self.s is not None:
-			print('- Strategy')
-			print(self.get_s())
-			print('- Weight')
-			print(self.get_pw())
+		self.train_data, self.test_data = None,None
 
 	def get_s_df(self):
 		if self.s is not None:
-			return pd.DataFrame(self.s,columns=[STRATEGY_COLUMN],index=self.test_arrays.ts)
+			return pd.DataFrame(self.s,columns=[STRATEGY_COLUMN],index=self.test_data.get_ts_as_timestamp())
 		else:
 			print('ola none s')
 			return None
 	def get_w_df(self):
 		if self.w is not None:
-			return pd.DataFrame(self.w,columns=[WEIGHT_PREFIX_COLUMNS+c for c in self.test_arrays.y_cols],index=self.test_arrays.ts)
+			return pd.DataFrame(self.w,columns=[WEIGHT_PREFIX_COLUMNS+c for c in self.test_data.y_cols],index=self.test_data.get_ts_as_timestamp())
 		else:
 			print('ola none w')
 			return None	
 	def get_pw_df(self):
 		if self.pw is not None:
-			return pd.DataFrame(self.pw,columns=[PORTFOLIO_WEIGHT_COLUMN],index=self.test_arrays.ts)
+			return pd.DataFrame(self.pw,columns=[PORTFOLIO_WEIGHT_COLUMN],index=self.test_data.get_ts_as_timestamp())
 		else:
 			print('ola none pw')
 			return None
 
-	def view(self):
-		print()
-		print('** Model Pipe **')
-		self.model.view()
-		print()
-		self.x_transform.view()
-		print()
-		self.y_transform.view()
-		print()
+	# ------------
 	# setters
 	def set_model(self, model):
-		self.model=copy.deepcopy(model)
+		self.model = copy.deepcopy(model)
 		return self
 
-	def set_x_transform(self,x_transform:BaseTransform):
-		self.x_transform=x_transform
+	def set_x_transform(self, x_transform:BaseTransform):
+		self.x_transform = x_transform
 		return self
 
-	def set_y_transform(self,y_transform:BaseTransform):
-		self.y_transform=y_transform
+	def set_y_transform(self, y_transform:BaseTransform):
+		self.y_transform = y_transform
+		return self
+
+	def set_train_data(self, train_data):		
+		self.train_data = train_data
+		# when the train data is set, fit the transform
+		self.fit_transform()
+		return self
+
+	def set_test_data(self, test_data):
+		self.test_data = test_data
+		return self
+
+	def set_data(self, train_data, test_data):
+		self.set_train_data(train_data).set_test_data(test_data)
+		return self
+
+	# fit transforms
+	# ------------
+	def fit_x_transform(self):
+		if self.train_data.has_x: self.x_transform.fit(self.train_data.x)
+		return self
+
+	def fit_y_transform(self):
+		self.y_transform.fit(self.train_data.y)
 		return self
 
 	def fit_transform(self):
 		self.fit_x_transform().fit_y_transform()
 		# apply transform
-		if self.train_arrays.has_x: self.train_arrays.x = self.transform_x(self.train_arrays.x)
-		self.train_arrays.y = self.transform_y(self.train_arrays.y)
-
-	# fit transform
-	def fit_x_transform(self):
-		if self.train_arrays.has_x: self.x_transform.fit(self.train_arrays.x)
-		return self
-
-	def fit_y_transform(self):
-		self.y_transform.fit(self.train_arrays.y)
-		return self
+		if self.train_data.has_x: self.train_data.x = self.transform_x(self.train_data.x)
+		self.train_data.y = self.transform_y(self.train_data.y)
 
 	# apply transform
+	# ------------
 	def transform_x(self, x, copy_array = True):
 		if copy_array: x = np.array(x)
 		return self.x_transform.transform(x)
@@ -117,65 +105,11 @@ class ModelPipe:
 		if copy_array: y = np.array(y)
 		return self.y_transform.transform(y)
 
-
 	# estimate model
 	def estimate(self, **kwargs):
 		"""Train the model using the training data contained within this DataElement."""
-		# self.fit_x_transform(x).fit_y_transform(y)
-		# x=self.transform_x(x)
-		# y=self.transform_y(y)
-		# self.model.estimate(x=self.train, y=self.y_train)
-		self.model.estimate( **{'x' : self.train_arrays.x, 'y' : self.train_arrays.y, 'z' : self.train_arrays.z} )
+		self.model.estimate( **{'x' : self.train_data.x, 'y' : self.train_data.y, 'z' : self.train_data.z} )
 		return self
-
-	# --------------------------
-	# main external methods
-	# --------------------------
-	# set data
-
-
-	# TO REMOVE
-	# ------------
-	def set_cols(self, x_cols:list, y_cols:list):
-		self.x_cols,self.y_cols = x_cols,y_cols
-		return self
-
-	def check_cols(self, x_cols:list, y_cols:list):
-		assert x_cols==self.x_cols,"x columns do not match the existent model pipe"
-		assert y_cols==self.y_cols,"y columns do not match the existent model pipe"
-		return self
-
-	def set_train_data(self, x_train, y_train,copy_array = True):		
-		self.x_train = np.array(x_train) if copy_array else x_train
-		self.y_train = np.array(y_train) if copy_array else y_train
-		# when the train data is set, fit the transform
-		self.fit_transform()
-		return self
-
-	def set_test_data(self, x_test, y_test, ts, copy_array = True):
-		self.x_test = np.array(x_test) if copy_array else x_test
-		self.y_test = np.array(y_test) if copy_array else y_test
-		self.ts = copy.deepcopy(ts) if copy_array else ts
-		# do not transform here training data to make
-		# the implementation more clear when testing
-		return self
-
-	def set_data(self, x_train, y_train, x_test, y_test, ts):
-		self.set_train_data(x_train, y_train).set_test_data(x_test, y_test, ts)
-		return self
-	# -------
-
-	def set_train_arrays(self, arrays:Arrays):
-		self.train_arrays = arrays
-		self.fit_transform()
-		return self
-	def set_test_arrays(self, arrays:Arrays):
-		self.test_arrays = arrays
-		return self
-	def set_arrays(self, train_arrays:Arrays, test_arrays:Arrays):
-		self.set_train_arrays(train_arrays).set_test_arrays(test_arrays)
-		return self
-
 
 	# get weight
 	def get_weight(self, xq, x, y, z, apply_transform_x = True, apply_transform_y = True):
@@ -193,8 +127,8 @@ class ModelPipe:
 
 	def evaluate(self):
 		"""Evaluate the model using the test data and return performance metrics."""
-		n = self.test_arrays.y.shape[0]
-		p = self.test_arrays.y.shape[1]
+		n = self.test_data.y.shape[0]
+		p = self.test_data.y.shape[1]
 		self.s = np.zeros(n, dtype=np.float64)
 		self.w = np.zeros((n, p), dtype=np.float64)
 		self.pw = np.ones(n, dtype=np.float64)
@@ -206,22 +140,22 @@ class ModelPipe:
 			xq_ = None
 			x_ = None
 			z_ = None
-			if self.test_arrays.has_x:
-				xq_ = self.test_arrays.x[i]
-				x_ = self.test_arrays.x[:i]
-			if self.test_arrays.has_z:
-				z_ = self.test_arrays.z[i]
+			if self.test_data.has_x:
+				xq_ = self.test_data.x[i]
+				x_ = self.test_data.x[:i]
+			if self.test_data.has_z:
+				z_ = self.test_data.z[i]
 			w = self.get_weight(
 								xq = xq_, 
 								x = x_, 
-								y = self.test_arrays.y[:i], 
+								y = self.test_data.y[:i], 
 								z = z_,
 								apply_transform_x = True, 
 								apply_transform_y = True
 								)
 			self.w[i] = w
-			self.s[i] = np.dot(self.test_arrays.y[i], w)
-			self.pw[i] = self.get_pw(self.test_arrays.y[:i])
+			self.s[i] = np.dot(self.test_data.y[i], w)
+			self.pw[i] = self.get_pw(self.test_data.y[:i])
 
 # dict of ModelWrappers
 class ModelPipes:
@@ -293,15 +227,15 @@ class ModelPipes:
 			# it is assumed that the individual model pipes
 			# have suitable normalizations
 			# maybe this could be a method...
-			arrays = None
+			data = None
 			for k,e in self.items():
-				if arrays is None:
-					arrays = copy.deepcopy(e.train_arrays)
+				if data is None:
+					data = copy.deepcopy(e.train_data)
 				else:
-					arrays.stack(e.train_arrays)					
+					data.stack(e.train_data)					
 			# x = np.vstack([e.train_arrays.x for k,e in self.items()])
 			# y = np.vstack([e.train_arrays.y for k,e in self.items()])
-			self.master_model.estimate(**{'x':arrays.x,'y':arrays.y,'z':arrays.z})
+			self.master_model.estimate(**{'x':data.x,'y':data.y,'z':data.z})
 			# set individual copies			
 			for k,e in self.items(): e.set_model(self.master_model)
 		else:

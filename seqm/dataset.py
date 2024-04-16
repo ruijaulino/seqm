@@ -6,42 +6,50 @@ from typing import List, Union, Dict
 import copy
 import tqdm
 try:
+	from .generators import linear
+	from .data import Data
 	from .models import ConditionalGaussian
-	from .arrays import Arrays
-	from .uts import add_unix_timestamp,unix_timestamp_to_index
 	from .constants import *
 	from .model_pipe import ModelPipe,ModelPipes,Path
 	from .transform import RollPWScaleTransform
 	from .post_process import post_process,portfolio_post_process
 except ImportError:
+	from generators import linear
+	from data import Data
 	from models import ConditionalGaussian
-	from arrays import Arrays
-	from uts import add_unix_timestamp,unix_timestamp_to_index
 	from constants import *
 	from model_pipe import ModelPipe,ModelPipes,Path
 	from transform import RollPWScaleTransform
 	from post_process import post_process,portfolio_post_process
 
-# dict of Dataframes with properties
+# dict of Data with properties
 class Dataset:
 	def __init__(self, dataset = {}):
 		self.dataset = dataset
-		# add unix timestamp when data is inserted
-		for k,v in self.dataset.items():v=add_unix_timestamp(v)
-		self.folds_dates = []
+		# convert dict of DataFrames to Data is necessary
+		for k,v in self.items():
+			if isinstance(v,pd.DataFrame):
+				self[k] = Data.from_df(v)
+		self.folds_ts = []
 		
 	# methods to behave like dict
-	def add(self, key, item: pd.DataFrame):
-		if not isinstance(item, ModelWrapper):
-			raise TypeError("Item must be an instance of pd.DataFrame")
-		self.dataset[key] = copy.deepcopy(add_unix_timestamp(item))
+	def add(self, key, item: Union[pd.DataFrame,Data]):
+		if isinstance(item, pd.DataFrame):
+			item = Data.from_df(item)
+		else:
+			if not isinstance(item, Data):			
+				raise TypeError("Item must be an instance of pd.DataFrame or Data")
+		self.dataset[key] = item
 
 	def __getitem__(self, key):
 		return self.dataset[key]
 
-	def __setitem__(self, key, item: pd.DataFrame):
-		if not isinstance(item, pd.DataFrame):
-			raise TypeError("Item must be an instance of pd.DataFrame")
+	def __setitem__(self, key, item: Union[pd.DataFrame,Data]):
+		if isinstance(item, pd.DataFrame):
+			item = Data.from_df(item)
+		else:
+			if not isinstance(item, Data):			
+				raise TypeError("Item must be an instance of pd.DataFrame or Data")		
 		self.dataset[key] = copy.deepcopy(item)
 
 	def __len__(self):
@@ -64,69 +72,17 @@ class Dataset:
 
 	# specific methods
 
-	# split dates into folds for posterior use
-	def split_dates(self, k_folds=3):
-		ts = pd.DatetimeIndex([])
-		for k,df in self.dataset.items():
-			ts = ts.union(df.index.unique())
-		ts = ts.sort_values()
+	def split_ts(self, k_folds=3):
+		# join all ts arrays
+		ts = []
+		for k,data in self.dataset.items():
+			ts.append(data.ts)
+		ts = np.hstack(ts)
+		ts = np.unique(ts)
 		idx_folds = np.array_split(ts, k_folds)
-		self.folds_dates = [(fold[0], fold[-1]) for fold in idx_folds]
+		self.folds_ts = [(fold[0], fold[-1]) for fold in idx_folds]
 		return self
 
-	def set_train_on_pipes(self, model_pipes: ModelPipes):
-		'''
-		Set the training data in the model_pipes
-		'''
-		assert self.keys()==model_pipes.keys(),"dataset and model_pipes must have the same keys"
-		for key, df in self.items():
-			# get arrays
-			arrays = Arrays()
-			arrays.from_df(df)
-			# use the arrays class to pass by arrays
-			#x = df.iloc[:, df.columns.str.startswith(FEATURE_PREFIX)].values
-			#y = df.iloc[:, df.columns.str.startswith(TARGET_PREFIX)].values
-			#x_cols,y_cols=self.get_xy_cols(df)
-			model_pipes[key].set_train_arrays(arrays) # set_cols(x_cols,y_cols).set_train_data(x_train=x, y_train=y, copy_array = True)
-		return model_pipes
-
-	def set_test_on_pipes(self, model_pipes: ModelPipes):
-		# maybe this can be relaxed??
-		assert self.keys()==model_pipes.keys(),"dataset and model_pipes must have the same keys"
-		for key, df in self.items():
-			# get arrays
-			arrays = Arrays()
-			arrays.from_df(df, add_ts = True)
-			#x = df.iloc[:, df.columns.str.startswith(FEATURE_PREFIX)].values
-			#y = df.iloc[:, df.columns.str.startswith(TARGET_PREFIX)].values
-			#x_cols,y_cols=self.get_xy_cols(df)
-			model_pipes[key].set_test_arrays(arrays) #.check_cols(x_cols,y_cols).set_test_data(x_test=x, y_test=y, ts=df.index, copy_array = True)		
-		return model_pipes
-
-	# ------
-	# REMOVE METHODS
-	def _slice_segment(self, df, burn_fraction, min_burn_points):
-		if df.empty:
-			return np.array([]), np.array([])		
-		x = df.iloc[:, df.columns.str.startswith(FEATURE_PREFIX)].values
-		y = df.iloc[:, df.columns.str.startswith(TARGET_PREFIX)].values
-		idx = np.arange(x.shape[0])
-		idx = self._random_subsequence(idx, burn_fraction, min_burn_points)
-		return x[idx], y[idx]
-	@staticmethod
-	def _random_subsequence(ar, burn_fraction, min_burn_points):
-		a, b = np.random.randint(max(min_burn_points, 1), max(int(ar.size * burn_fraction), min_burn_points + 1), size=2)
-		return ar[a:-b]
-	# ------
-
-	@staticmethod
-	def get_xy_cols(df):
-		cols = df.columns.tolist()
-		x_cols=[c for c in cols if c.startswith(FEATURE_PREFIX)]		
-		y_cols=[c for c in cols if c.startswith(TARGET_PREFIX)]
-		return x_cols, y_cols
-	
-	
 	def set_train_test_fold(
 							self, 
 							model_pipes: ModelPipes, 
@@ -138,61 +94,47 @@ class Dataset:
 
 		if seq_path and test_index == 0:
 			raise ValueError("Cannot start at fold 0 when path is sequential")
-		if self.folds_dates is None:
+		if len(self.folds_ts) is None:
 			raise ValueError("Need to split before getting the split")
 		assert self.keys()==model_pipes.keys(),"dataset and model_pipes must have the same keys"
 
-		for key, df in self.items():
+		for key, data in self.items():
 
-			ts_lower, ts_upper = self.folds_dates[test_index]
+			ts_lower, ts_upper = self.folds_ts[test_index]
 			
-			arrays_train = Arrays()
-			arrays_train.from_df(df[df.index < ts_lower]).slice(burn_fraction, min_burn_points)
+			train_data = data.before(ts = ts_lower, create_new = True)
+			train_data.random_segment(burn_fraction, min_burn_points)
 			
-			arrays_train_add = Arrays()
-			df_train_add = df[df.index > ts_upper] if not seq_path else pd.DataFrame(columns=df.columns)  # Empty if sequential
-			arrays_train_add.from_df(df_train_add).slice(burn_fraction, min_burn_points)
+			# if path is non sequential add data after the test set
+			if not seq_path:
+				train_data_add = data.after(ts = ts_upper, create_new = True)
+				train_data_add.random_segment(burn_fraction, min_burn_points)
+				train_data.stack(train_data_add)
 
-			# concat/stack
-			arrays_train.stack(arrays_train_add)
+			test_data = data.between(ts_lower, ts_upper, create_new = True)
 
-			#x_train_pre, y_train_pre = self._slice_segment(df_pre_test, burn_fraction, min_burn_points)
-			#x_train_post, y_train_post = self._slice_segment(df_post_test, burn_fraction, min_burn_points)
-			
-			# Concatenate pre and post segments if non-sequential
-			#x_train = np.vstack([x_train_pre, x_train_post]) if x_train_pre.size and x_train_post.size else x_train_pre if x_train_pre.size else x_train_post
-			#y_train = np.vstack([y_train_pre, y_train_post]) if y_train_pre.size and y_train_post.size else y_train_pre if y_train_pre.size else y_train_post
-			
-			df_test = df[(df.index >= ts_lower) & (df.index <= ts_upper)]
-			arrays_test = Arrays()
-			arrays_test.from_df(df_test, add_ts = True)
-
-			# x_test, y_test = df_test.iloc[:, df.columns.str.startswith(FEATURE_PREFIX)].values, df_test.iloc[:, df.columns.str.startswith(TARGET_PREFIX)].values
-
-			# x_cols,y_cols=self.get_xy_cols(df)
-
-			if arrays_train.empty and arrays_test.empty:
+			if train_data.empty and test_data.empty:
 				model_pipes.remove(key)
 			else:
-				model_pipes[key].set_arrays(arrays_train,arrays_test)
-
-			#if x_train.shape[0]!=0 and x_test.shape[0]!=0:			
-			#	model_pipes[key].set_cols(x_cols, y_cols).set_data(x_train, y_train, x_test, y_test, df_test.index)
-			#else:
+				model_pipes[key].set_data(train_data, test_data)
 
 		return model_pipes
 
 	# main methods to make studies on the dataset
-	def train(self, model_pipes:ModelPipes, share_model = True):
+	def train(self, model_pipes:ModelPipes):
 		# associate model pipes with the dataset
-		model_pipes = self.set_train_on_pipes(model_pipes)
+		assert self.keys()==model_pipes.keys(),"dataset and model_pipes must have the same keys"
+		for key, data in self.items():
+			model_pipes[key].set_train_data(data) 
 		# estimate models
 		model_pipes.estimate()
 		return model_pipes
 
 	def test(self, model_pipes: ModelPipes):	
 		path=Path()
-		model_pipes = self.set_test_on_pipes(model_pipes)
+		assert self.keys()==model_pipes.keys(),"dataset and model_pipes must have the same keys"
+		for key, data in self.items():
+			model_pipes[key].set_test_data(data)
 		model_pipes.evaluate()
 		path.add(model_pipes)
 		path.join()
@@ -201,40 +143,29 @@ class Dataset:
 		
 	def live(self, model_pipes: ModelPipes):
 		out = {}
-		for key, df in self.items():
+		for key, data in self.items():
 			if model_pipes.has_keys(key):
 				# note
 				# for a live application it makes sense that the last observation of 
 				# y has nan because it is not available yet!
-				# assume here that the data has that format
-				
-				arrays = Arrays()
-				arrays.from_df(df)
-
-				#x = df.iloc[:, df.columns.str.startswith(FEATURE_PREFIX)].values
-				#y = df.iloc[:, df.columns.str.startswith(TARGET_PREFIX)].values
-				#x_cols,y_cols=self.get_xy_cols(df)
-				
-				# model_pipes[key].check_cols(x_cols,y_cols)
-				
+				# assume here that the data has that format				
 				xq_ = None
 				x_ = None
 				z_ = None
-				if arrays.has_x:
-					xq_ = arrays.x[-1]
-					x_ = arrays.x[:-1]
-				if arrays.has_z:
-					z_ = arrays.z[-1]
+				if data.has_x:
+					xq_ = data.x[-1]
+					x_ = data.x[:-1]
+				if data.has_z:
+					z_ = data.z[-1]
 				w = model_pipes[key].get_weight(
 										xq = xq_, 
 										x = x_, 
-										y = arrays.y[:-1], 
+										y = data.y[:-1], 
 										z = z_,
 										apply_transform_x = True, 
 										apply_transform_y = True
 										)
-
-				pw = model_pipes[key].get_pw(arrays.y[:-1])		
+				pw = model_pipes[key].get_pw(data.y[:-1])		
 				out.update({key:{'w':w,'pw':pw}})		
 		return out
 
@@ -257,7 +188,7 @@ class Dataset:
 		the output is a list of this dicts
 		'''
 		# Prepare the data
-		self.split_dates(k_folds)			
+		self.split_ts(k_folds)					
 		start_fold = max(1, start_fold) if seq_path else start_fold		
 		paths = []
 		for m in tqdm.tqdm(range(n_paths)):
@@ -279,20 +210,10 @@ class Dataset:
 		return paths
 
 
-# generate data
-def generate_lr(n=1000,a=0,b=0.1,start_date='2000-01-01'):
-	x=np.random.normal(0,0.01,n)
-	a=0
-	b=0.1
-	y=a+b*x+np.random.normal(0,0.01,n)
-	dates=pd.date_range(start_date,periods=n,freq='D')
-	data=pd.DataFrame(np.hstack((y[:,None],x[:,None])),columns=['y1','x1'],index=dates)
-	return data
-
 def run_train_test_live():
-	data1=generate_lr(n=100,a=0,b=0.1,start_date='2000-01-01')
-	data2=generate_lr(n=70,a=0,b=0.1,start_date='2000-06-01')
-	data3=generate_lr(n=150,a=0,b=0.1,start_date='2001-01-01')
+	data1=linear(n=1000,a=0,b=0.1,start_date='2000-01-01')
+	data2=linear(n=700,a=0,b=0.1,start_date='2000-06-01')
+	data3=linear(n=1500,a=0,b=0.1,start_date='2001-01-01')
 	
 	# create dataset
 	dataset=Dataset({'dataset 1':data1,'dataset 2':data2})
@@ -312,9 +233,9 @@ def run_train_test_live():
 	model_pipes = dataset.train(model_pipes)
 	print('RUN TEST')
 	# generate new data for testing
-	data1=generate_lr(n=100,a=0,b=0.1,start_date='2005-01-01')
-	data2=generate_lr(n=70,a=0,b=0.1,start_date='2005-06-01')
-	data3=generate_lr(n=150,a=0,b=0.1,start_date='2005-01-01')
+	data1=linear(n=1000,a=0,b=0.1,start_date='2005-01-01')
+	data2=linear(n=700,a=0,b=0.1,start_date='2005-06-01')
+	data3=linear(n=1500,a=0,b=0.1,start_date='2005-01-01')
 	
 	# create dataset
 	dataset_test = Dataset({'dataset 1':data1,'dataset 2':data2})
@@ -327,14 +248,17 @@ def run_train_test_live():
 	print(out)
 
 def run_cvbt():
-	data1=generate_lr(n=1000,a=0,b=0.1,start_date='2000-01-01')
-	data2=generate_lr(n=700,a=0,b=0.1,start_date='2000-06-01')
-	data3=generate_lr(n=1500,a=0,b=0.1,start_date='2001-01-01')
+	
+	data1=linear(n=1000,a=0,b=0.1,start_date='2000-01-01')
+	data2=linear(n=700,a=0,b=0.1,start_date='2000-06-01')
+	data3=linear(n=1500,a=0,b=0.1,start_date='2001-01-01')
 	
 	# create dataset
 	dataset=Dataset({'dataset 1':data1})#,'dataset 2':data2})	
+	
 	model=ConditionalGaussian(n_gibbs=None,kelly_std=3,max_w=100)
 	model_pipes=ModelPipes(model)
+	
 	for key in dataset.keys():
 		# model=ConditionalGaussian(n_gibbs=None,kelly_std=3,max_w=100)
 		# did not set individual model on purpose
@@ -353,6 +277,7 @@ def run_cvbt():
 					share_model=True, 
 					view_models=False
 					)
+
 	portfolio_post_process(paths)
 
 if __name__=='__main__':
