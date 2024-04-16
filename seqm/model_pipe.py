@@ -16,6 +16,8 @@ except ImportError:
 
 # class with a model and a transformer
 # train, test, live of model
+
+
 class ModelPipe:
 	
 	def __init__(
@@ -108,7 +110,7 @@ class ModelPipe:
 	# estimate model
 	def estimate(self, **kwargs):
 		"""Train the model using the training data contained within this DataElement."""
-		self.model.estimate( **{'x' : self.train_data.x, 'y' : self.train_data.y, 'z' : self.train_data.z} )
+		self.model.estimate(**self.train_data.build_train_inputs())
 		return self
 
 	# get weight
@@ -127,35 +129,43 @@ class ModelPipe:
 
 	def evaluate(self):
 		"""Evaluate the model using the test data and return performance metrics."""
+		
 		n = self.test_data.y.shape[0]
 		p = self.test_data.y.shape[1]
+		
+		idx = self.test_data.converted_idx()
+		if idx is None:
+			idx=np.array([[0,n]],dtype=int)		
+		n_seq=idx.shape[0]
+
 		self.s = np.zeros(n, dtype=np.float64)
 		self.w = np.zeros((n, p), dtype=np.float64)
 		self.pw = np.ones(n, dtype=np.float64)
 
-		for i in range(n):
-			# normalize y for input (make copy of y)
-			# make sure this array does not get modified
-			# the x input is already normalized!
-			xq_ = None
-			x_ = None
-			z_ = None
-			if self.test_data.has_x:
-				xq_ = self.test_data.x[i]
-				x_ = self.test_data.x[:i]
-			if self.test_data.has_z:
-				z_ = self.test_data.z[i]
-			w = self.get_weight(
-								xq = xq_, 
-								x = x_, 
-								y = self.test_data.y[:i], 
-								z = z_,
-								apply_transform_x = True, 
-								apply_transform_y = True
-								)
-			self.w[i] = w
-			self.s[i] = np.dot(self.test_data.y[i], w)
-			self.pw[i] = self.get_pw(self.test_data.y[:i])
+		for l in range(n_seq): 
+			for i in range(idx[l][0],idx[l][1]):
+				# normalize y for input (make copy of y)
+				# make sure this array does not get modified
+				# the x input is already normalized!
+				xq_ = None
+				x_ = None
+				z_ = None
+				if self.test_data.has_x:
+					xq_ = self.test_data.x[i]
+					x_ = self.test_data.x[idx[l][0]:i]
+				if self.test_data.has_z:
+					z_ = self.test_data.z[i]
+				w = self.get_weight(
+									xq = xq_, 
+									x = x_, 
+									y = self.test_data.y[idx[l][0]:i], 
+									z = z_,
+									apply_transform_x = True, 
+									apply_transform_y = True
+									)
+				self.w[i] = w
+				self.s[i] = np.dot(self.test_data.y[i], w)
+				self.pw[i] = self.get_pw(self.test_data.y[:i])
 
 # dict of ModelWrappers
 class ModelPipes:
@@ -235,7 +245,7 @@ class ModelPipes:
 					data.stack(e.train_data)					
 			# x = np.vstack([e.train_arrays.x for k,e in self.items()])
 			# y = np.vstack([e.train_arrays.y for k,e in self.items()])
-			self.master_model.estimate(**{'x':data.x,'y':data.y,'z':data.z})
+			self.master_model.estimate(**data.build_train_inputs())
 			# set individual copies			
 			for k,e in self.items(): e.set_model(self.master_model)
 		else:

@@ -6,17 +6,17 @@ from typing import List, Union, Dict
 import copy
 import tqdm
 try:
-	from .generators import linear
+	from .generators import linear,simulate_hmm
 	from .data import Data
-	from .models import ConditionalGaussian
+	from .models import ConditionalGaussian,GaussianHMM
 	from .constants import *
 	from .model_pipe import ModelPipe,ModelPipes,Path
 	from .transform import RollPWScaleTransform
 	from .post_process import post_process,portfolio_post_process
 except ImportError:
-	from generators import linear
+	from generators import linear,simulate_hmm
 	from data import Data
-	from models import ConditionalGaussian
+	from models import ConditionalGaussian,GaussianHMM
 	from constants import *
 	from model_pipe import ModelPipe,ModelPipes,Path
 	from transform import RollPWScaleTransform
@@ -178,7 +178,6 @@ class Dataset:
 			n_paths=4, 
 			burn_fraction=0.1, 
 			min_burn_points=3, 
-			view_models=False,
 			**kwargs
 			):
 		'''
@@ -201,7 +200,7 @@ class Dataset:
 															burn_fraction=burn_fraction,
 															min_burn_points=min_burn_points,
 															seq_path=seq_path
-															)			
+															)								
 				local_model_pipes.estimate()
 				local_model_pipes.evaluate()
 				path.add(local_model_pipes)
@@ -280,7 +279,96 @@ def run_cvbt():
 
 	portfolio_post_process(paths)
 
+
+def multiseq():
+	A=np.array([
+				[0.9,0.1,0],
+				[0,0.9,0.1],
+				[0,0,1.]
+			]) # state transition
+	P=np.array([0.7,0.3,0]) # initial state distribution
+	means=[
+			np.array([-1]),
+			np.array([0.]),
+			np.array([1])
+		] # let the means be different from zero 
+	# list of covariance matrices (for each mixture)
+	covs=[
+		np.array([[0.25]]),
+		np.array([[0.01]]),
+		np.array([[0.25]])
+	]
+	k=100
+	n_min=5
+	n_max=15
+	o=[]
+	msidx=[]
+	for i in range(k):
+		n=np.random.randint(n_min,n_max)
+		x_,z_=simulate_hmm(n,A,P,means,covs)
+		o.append(x_)
+		msidx.append(i*np.ones(x_.shape[0],dtype=int)[:,None])
+		# plt.plot(x_)
+	# plt.grid(True)
+	# plt.show()
+	y=np.vstack(o)  
+	msidx=np.vstack(msidx)
+	dates=pd.date_range('2000-01-01',periods=y.shape[0],freq='B')
+	data1=pd.DataFrame(np.hstack((y,msidx)),columns=['y1','idx'],index=dates)
+	
+	k=100
+	n_min=5
+	n_max=15
+	o=[]
+	msidx=[]
+	for i in range(k):
+		n=np.random.randint(n_min,n_max)
+		x_,z_=simulate_hmm(n,A,P,means,covs)
+		o.append(x_)
+		msidx.append(i*np.ones(x_.shape[0],dtype=int)[:,None])
+		# plt.plot(x_)
+	# plt.grid(True)
+	# plt.show()
+	y=np.vstack(o)  
+	msidx=np.vstack(msidx)
+	dates=pd.date_range('2000-01-01',periods=y.shape[0],freq='B')
+	data2=pd.DataFrame(np.hstack((y,msidx)),columns=['y1','idx'],index=dates)
+	
+	print(data1)
+	print(data2)
+
+	dataset=Dataset({'dataset 1':data1,'dataset 2':data2})	
+
+
+	A_zeros=[[0,2],[1,0],[2,0],[2,1]]
+	A_groups=[]
+
+	model=GaussianHMM(n_states=3,n_gibbs=250,A_zeros=A_zeros,A_groups=A_groups)
+
+	model_pipes=ModelPipes(model)
+	for key in dataset.keys():
+		# model=GaussianHMM(n_states=3,n_gibbs=100,kelly_std=2,max_w=1)
+		model_pipe_ = ModelPipe() 
+		model_pipes[key] = model_pipe_
+
+	paths=dataset.cvbt(
+					model_pipes, 
+					k_folds=4, 
+					seq_path=False, 
+					start_fold=0, 
+					n_paths=4, 
+					burn_fraction=0.1, 
+					min_burn_points=3, 
+					share_model=True, 
+					view_models=False
+					)
+
+	portfolio_post_process(paths)
+
 if __name__=='__main__':
+	
+	# multiseq()
+
 	print('run cvbt')
 	run_cvbt()
 	# print('run train/test/live')

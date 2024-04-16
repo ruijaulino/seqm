@@ -43,7 +43,41 @@ class Data:
 		self.x_cols,self.y_cols = x_cols,y_cols
 		self.has_x = False if self.x is None else True
 		self.has_z = False if self.z is None else True
+		
+		if self.idx is None: self.idx = np.zeros(self.y.shape[0],dtype=int)
+		self.fix_idx()
 
+	def converted_idx(self):
+		'''
+		idx: numpy (n,) array like 0,0,0,1,1,1,1,2,2,2,3,3,3,4,4,...
+			with the indication where the subsequences are
+			creates an array like
+			[
+			[0,3],
+			[3,7],
+			...
+			]
+			with the indexes where the subsequences start and end
+		'''
+		aux=self.idx[1:]-self.idx[:-1]
+		aux=np.where(aux!=0)[0]
+		aux+=1
+		aux_left=np.hstack(([0],aux))
+		aux_right=np.hstack((aux,[self.idx.size]))
+		out=np.hstack((aux_left[:,None],aux_right[:,None]))
+		return out
+
+
+	def fix_idx(self):
+		# idx need to be an array like 000,1111,2222,33,444
+		# but can be something like 111,000,11,00000,1111,22
+		# i.e, the indexes of the sequence need to be in order for the
+		# cvbt to work. Fix the array in case this is not verified
+		# this is a bit of overhead but has to be this way
+		idx=np.zeros(self.idx.size,dtype=int)
+		aux=self.idx[1:]-self.idx[:-1]
+		idx[np.where(aux!=0)[0]+1]=1
+		self.idx=np.cumsum(idx)
 
 	def get_ts_as_timestamp(self):
 		return pd.to_datetime( self.ts * 10 ** 9 )
@@ -72,14 +106,15 @@ class Data:
 		y = df.iloc[:, df.columns.str.startswith(TARGET_PREFIX)].values
 		assert y.shape[1] != 0, "no target columns"		
 		ts = df['ts'].values
-		idx = None # not yet
+		idx = df.iloc[:, [e==MULTISEQ_IDX_COL for e in df.columns.tolist()]].values
+		idx = None if idx.shape[1] == 0 else np.array(idx[:,0],dtype=int)
 		x_cols, y_cols = get_df_cols(df)		
 		return cls(y, x, z, idx, ts, x_cols, y_cols, safe_arrays)
 
 	def _from_idx(self, idx:np.ndarray, create_new = False):		
 		y_ = self.y[idx]
 		ts_ = self.ts[idx]
-		idx_ = self.idx
+		idx_ = self.idx[idx]
 		x_ = self.x[idx] if self.has_x else None
 		z_ = self.z[idx] if self.has_z else None 
 		if create_new:
@@ -89,6 +124,7 @@ class Data:
 			self.x = x_
 			self.ts = ts_
 			self.z = z_
+			self.idx = idx_
 			return self		
 
 	@staticmethod
@@ -146,6 +182,7 @@ class Data:
 		self.ts = np.hstack((self.ts,data.ts))
 		if self.has_x: self.x = np.vstack((self.x,data.x))
 		if self.has_z: self.z = np.vstack((self.z,data.z))
+		self.idx = np.hstack((self.idx,data.idx+self.idx[-1]-data.idx[0]+1))
 		return self		
 
 	def check_cols(self, data:'Data'):
@@ -153,6 +190,12 @@ class Data:
 		assert self.y_cols == data.y_cols,"x_cols are different"
 		assert self.has_z == data.has_z,"z is different"
 		return self
+
+	def build_train_inputs(self):
+		'''
+		build train inputs for models		
+		'''
+		return {'x' : self.x, 'y' : self.y, 'z' : self.z, 'idx':self.converted_idx()} 
 
 if __name__ == '__main__':
 	
