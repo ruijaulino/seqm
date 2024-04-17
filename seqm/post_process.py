@@ -131,7 +131,7 @@ def filter_paths(paths:List[Dict[str,pd.DataFrame]],start_date:str = '',end_date
 	return f_paths
 
 
-def post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,key=None,start_date='',end_date=''):
+def post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,key=None,start_date='',end_date='',*args,**kwargs):
 	'''
 	paths: list of dict like [{'dataset 1':df,'dataset 2':df},{'dataset 1':df,'dataset 2':df},...]
 		each element of the paths list is the result for a given path
@@ -178,7 +178,7 @@ def post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr
 	performance_summary(s,sr_mult,pct_fee=pct_fee)
 	
 
-def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,view_weights=True,use_pw=True,multiplier=1,start_date='',end_date=''):
+def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,view_weights=True,use_pw=True,multiplier=1,start_date='',end_date='',*args,**kwargs):
 
 	paths = filter_paths(paths,start_date,end_date)
 
