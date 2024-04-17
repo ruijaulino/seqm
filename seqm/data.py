@@ -167,9 +167,13 @@ class Data:
 		self.has_x = data.has_x
 		self.has_z = data.has_z
 
-	def stack(self, data:'Data'):
+	def stack(self, data:'Data', allow_both_empty = False):
 		# make sure both are not empty
-		if self.empty and data.empty: raise Exception('both Data are empty. Cannot stack.')
+		if self.empty and data.empty:
+			if allow_both_empty: 		
+				return self
+			else:
+				raise Exception('both Data are empty. Cannot stack.')
 		if self.empty and not data.empty:
 			self._copy(data)
 			return self

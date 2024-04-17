@@ -113,7 +113,7 @@ class Dataset:
 
 			test_data = data.between(ts_lower, ts_upper, create_new = True)
 
-			if train_data.empty and test_data.empty:
+			if train_data.empty or test_data.empty:
 				model_pipes.remove(key)
 			else:
 				model_pipes[key].set_data(train_data, test_data)

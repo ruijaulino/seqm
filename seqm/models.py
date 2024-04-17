@@ -607,7 +607,9 @@ class StateConditionalGaussian(object):
 		n=y.shape[0]
 		if z is None:
 			z=np.zeros(n,dtype=int)
-		assert z.ndim==1,"z must be a vector"
+		# assert z.ndim==1,"z must be a vector"
+		if z.ndim!=1:
+			z=z[:,None]		
 		z=np.array(z,dtype=int)
 		uz=np.unique(z)
 		for e in uz:
@@ -800,8 +802,6 @@ class GaussianMixture(object):
 		assert self.min_k<=1 and self.min_k>=0,"min_k must be between 0 and 1"
 		assert self.max_k>=self.min_k,"max_k must be larger or equal than min_k"
 		
-
-
 	def view(self,plot_hist=True,round_to=5):
 		print('** Gaussian Mixture **')
 		if self.names is None:
@@ -986,7 +986,6 @@ class GaussianMixture(object):
 			samples[i]=np.random.multivariate_normal(self.states_mean[zi],self.states_cov[zi])		
 		return samples
 
-
 class ConditionalGaussianMixture(object):
 	def __init__(self,n_states,n_gibbs=1000,f_burn=0.1,min_k=0.25,max_k=0.25,kelly_std=2,max_w=1):
 		self.n_states=n_states
@@ -1019,6 +1018,7 @@ class ConditionalGaussianMixture(object):
 			names.append("y%s"%(i+1))
 		for i in range(self.q):
 			names.append("x%s"%(i+1))
+
 		self.gm=GaussianMixture(self.n_states,self.n_gibbs,self.f_burn,self.min_k,self.max_k,names)
 		self.gm.estimate(z)
 		# extract distribution of y|x from the estimated covariance
@@ -1165,11 +1165,12 @@ class SameConditionalGaussianMixture(object):
 
 # n_states,n_gibbs=1000,f_burn=0.1,max_k=0.25,kelly_std=2,max_w=1
 class StateConditionalGaussianMixture(object):
-	def __init__(self,n_states,n_gibbs=None,f_burn=0.1,max_k=0.25,min_points=10,kelly_std=2,max_w=1):
+	def __init__(self,n_states,n_gibbs=None,f_burn=0.1,min_k=0.25,max_k=0.25,min_points=10,kelly_std=2,max_w=1):
 		self.n_states=n_states
 		self.n_gibbs=n_gibbs
 		self.no_gibbs=False
 		self.kelly_std=kelly_std
+		self.min_k = min_k
 		self.max_w=max_w
 		if self.n_gibbs is None:
 			self.no_gibbs=True
@@ -1195,12 +1196,14 @@ class StateConditionalGaussianMixture(object):
 		n=y.shape[0]
 		if z is None:
 			z=np.zeros(n,dtype=int)
-		assert z.ndim==1,"z must be a vector"
+		# assert z.ndim==1,"z must be a vector"
+		if z.ndim!=1:
+			z=z[:,None]		
 		z=np.array(z,dtype=int)
 		uz=np.unique(z)
 		for e in uz:
-			
-			g=ConditionalGaussianMixture(self.n_states,self.n_gibbs,self.f_burn,self.max_k,self.kelly_std)
+			g=ConditionalGaussianMixture(self.n_states,self.n_gibbs,self.f_burn,self.min_k,self.max_k,self.kelly_std,self.max_w)
+
 			i=np.where(z==e)[0]
 			if i.size>self.min_points:
 				g.estimate(y[i],x[i])

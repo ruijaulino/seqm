@@ -242,9 +242,8 @@ class ModelPipes:
 				if data is None:
 					data = copy.deepcopy(e.train_data)
 				else:
-					data.stack(e.train_data)					
-			# x = np.vstack([e.train_arrays.x for k,e in self.items()])
-			# y = np.vstack([e.train_arrays.y for k,e in self.items()])
+					data.stack(e.train_data, allow_both_empty = True)
+			if data.empty: raise Exception('data is empty. should not happen')
 			self.master_model.estimate(**data.build_train_inputs())
 			# set individual copies			
 			for k,e in self.items(): e.set_model(self.master_model)
