@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.stats import invwishart
+from numpy.lib.stride_tricks import sliding_window_view
 import tqdm
 from numba import jit
 from abc import ABC, abstractmethod
@@ -201,6 +202,74 @@ def backward_sample(A,alpha,q,transition_counter,init_state_counter):
 		transition_counter[q[j],q[j+1]]+=1 
 	# increment initial state counter
 	init_state_counter[q[0]]+=1
+
+
+
+
+
+class MovingAverage(object):
+
+	def __init__(self, windows = 20, quantile = 0.9, vary_weights = True, **kwargs):
+		self.windows = windows
+		if isinstance(self.windows,int): self.windows = [self.windows]
+		self.windows = np.array(self.windows, dtype = int)
+		self.quantile = quantile		
+		self.vary_weights = vary_weights
+		self.w_norm = np.ones(self.windows.size, dtype = int)
+		self.aux_w = 1
+		self.p = 1
+	
+	def view(self, plot_hist=True):
+		pass
+	
+	def estimate(self, y, **kwargs): 
+		'''
+		The estimate is just to calculate the bounds
+		that the weights can have		
+		'''
+		# calculate the weight bounds
+		if y.ndim == 1: y = y[:,None]
+		self.p = y.shape[1]
+		if self.vary_weights:
+			# check if we have enough points to estimate weights bounds
+			if y.shape[0] < 2*np.max(self.windows):
+				self.aux_w = 0 # to multiply weights by zero on get_weight			
+			else:
+				for i in range(self.windows.size):
+					m_mean = np.mean(sliding_window_view(y, window_shape = self.windows[i], axis = 0 ), axis=-1)
+					m_var = np.var(sliding_window_view(y, window_shape = self.windows[i], axis = 0 ), axis=-1)
+					m_var_np[m_var_np == 0] = np.inf
+					w = m_mean / m_var
+					w = np.sum(np.abs(w),axis = 1)
+					w = w[w!=0]
+					w.sort()		
+					self.w_norm[i] = w[int(self.quantile*w.size)]
+
+	def predict(self, y, **kwargs):
+		pass
+
+	def get_weight(self, y, **kwargs):
+		'''
+		simple moving average prediction
+		'''
+		if y.shape[0] > np.max(self.windows):
+			ws = np.zeros((self.windows.size, self.p))
+			for i in range(self.windows.size):
+				if self.vary_weights:
+					w = np.mean(y[-self.windows[i]:],axis=0) / np.var(y[-self.windows[i]:],axis=0)
+					w /= self.w_norm[i]
+				else:
+					w = np.sign(np.mean(y[-self.windows[i]:],axis=0))
+				l = np.sum(np.abs(w))
+				if l > 1: 
+					w /= l
+				ws[i] = w					
+			w = np.mean(ws, axis = 0)
+			w *= self.aux_w # in case we could not estimate the weight bounds
+			return w
+		else:
+			return np.zeros(self.p)
+
 
 
 

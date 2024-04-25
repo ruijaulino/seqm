@@ -18,6 +18,17 @@ except ImportError:
 # train, test, live of model
 
 
+def does_cls_have_method(cls_instance, method: str) -> bool:
+	instance_method = getattr(cls_instance, method, None)
+	if instance_method is None:
+		return False
+	else:
+		if callable(instance_method):
+			return True
+		else:
+			return False
+
+
 class ModelPipe:
 	
 	def __init__(
@@ -38,19 +49,18 @@ class ModelPipe:
 		if self.s is not None:
 			return pd.DataFrame(self.s,columns=[STRATEGY_COLUMN],index=self.test_data.get_ts_as_timestamp())
 		else:
-			print('ola none s')
 			return None
+	
 	def get_w_df(self):
 		if self.w is not None:
 			return pd.DataFrame(self.w,columns=[WEIGHT_PREFIX_COLUMNS+c for c in self.test_data.y_cols],index=self.test_data.get_ts_as_timestamp())
 		else:
-			print('ola none w')
 			return None	
+	
 	def get_pw_df(self):
 		if self.pw is not None:
 			return pd.DataFrame(self.pw,columns=[PORTFOLIO_WEIGHT_COLUMN],index=self.test_data.get_ts_as_timestamp())
 		else:
-			print('ola none pw')
 			return None
 
 	# ------------
@@ -142,6 +152,11 @@ class ModelPipe:
 		self.w = np.zeros((n, p), dtype=np.float64)
 		self.pw = np.ones(n, dtype=np.float64)
 
+		# for models that can benefict from incremental computations
+		# we can call a method set_start_evaluate to tell the model class
+		# to store previous computations and evaluate faster
+		if does_cls_have_method(self.model, 'set_start_evaluate'): self.model.set_start_evaluate()
+
 		for l in range(n_seq): 
 			for i in range(idx[l][0],idx[l][1]):
 				# normalize y for input (make copy of y)
@@ -166,6 +181,9 @@ class ModelPipe:
 				self.w[i] = w
 				self.s[i] = np.dot(self.test_data.y[i], w)
 				self.pw[i] = self.get_pw(self.test_data.y[:i])
+
+		# when this is called the class should reset the variables used for incremental evaluation
+		if does_cls_have_method(self.model, 'set_end_evaluate'): self.model.set_end_evaluate()
 
 # dict of ModelWrappers
 class ModelPipes:
