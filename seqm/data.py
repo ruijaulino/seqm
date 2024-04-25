@@ -49,6 +49,7 @@ class Data:
 		
 		if self.idx is None: self.idx = np.zeros(self.y.shape[0],dtype=int)
 		self.fix_idx()
+		assert self.y.shape[0] == self.idx.size, "y and idx have different sizes"
 
 	def converted_idx(self):
 		'''
@@ -85,12 +86,10 @@ class Data:
 	def get_ts_as_timestamp(self):
 		return pd.to_datetime( self.ts * 10 ** 9 )
 
-	def view(self,k=3):
+	def view(self):
 		print('** Data **')
-		if self.has_x:
-			print(np.hstack((self.ts[:,None],self.y,self.x)))
-		else:
-			print(np.hstack((self.ts[:,None],self.y)))
+		df = pd.DataFrame(self.y,index = self.get_ts_as_timestamp())
+		print(df)
 		print('**********')
 
 	@classmethod
@@ -123,6 +122,7 @@ class Data:
 		if create_new:
 			return Data(y_, x_, z_, idx_, ts_, self.x_cols, self.y_cols, safe_arrays=True)
 		else:
+			self.empty = True if y_ is None else True if y_.shape[0] == 0 else False
 			self.y = y_
 			self.x = x_
 			self.ts = ts_

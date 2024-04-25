@@ -215,13 +215,13 @@ class MovingAverage(object):
 		self.windows = np.array(self.windows, dtype = int)
 		self.quantile = quantile		
 		self.vary_weights = vary_weights
-		self.w_norm = np.ones(self.windows.size, dtype = int)
+		self.w_norm = np.ones(self.windows.size, dtype = float)
 		self.aux_w = 1
 		self.p = 1
-	
+
 	def view(self, plot_hist=True):
 		pass
-	
+
 	def estimate(self, y, **kwargs): 
 		'''
 		The estimate is just to calculate the bounds
@@ -238,12 +238,16 @@ class MovingAverage(object):
 				for i in range(self.windows.size):
 					m_mean = np.mean(sliding_window_view(y, window_shape = self.windows[i], axis = 0 ), axis=-1)
 					m_var = np.var(sliding_window_view(y, window_shape = self.windows[i], axis = 0 ), axis=-1)
-					m_var_np[m_var_np == 0] = np.inf
+					m_mean = np.nan_to_num(m_mean, copy = True, nan = 0.0)
+					m_var = np.nan_to_num(m_var, copy = True, nan = 0.0)
+					m_var[m_var == 0] = np.inf
 					w = m_mean / m_var
 					w = np.sum(np.abs(w),axis = 1)
 					w = w[w!=0]
-					w.sort()		
-					self.w_norm[i] = w[int(self.quantile*w.size)]
+					w.sort()
+					w_norm = w[int(self.quantile*w.size)]
+					if w_norm == 0: w_norm = np.inf
+					self.w_norm[i] = w_norm
 
 	def predict(self, y, **kwargs):
 		pass
@@ -256,20 +260,24 @@ class MovingAverage(object):
 			ws = np.zeros((self.windows.size, self.p))
 			for i in range(self.windows.size):
 				if self.vary_weights:
-					w = np.mean(y[-self.windows[i]:],axis=0) / np.var(y[-self.windows[i]:],axis=0)
+					mean = np.mean(y[-self.windows[i]:],axis=0)
+					var = np.var(y[-self.windows[i]:],axis=0)
+					mean = np.nan_to_num(mean, copy = True, nan = 0.0)
+					var = np.nan_to_num(var, copy = True, nan = 0.0)
+					var[var == 0] = np.inf					
+					w = mean / var
 					w /= self.w_norm[i]
 				else:
 					w = np.sign(np.mean(y[-self.windows[i]:],axis=0))
 				l = np.sum(np.abs(w))
 				if l > 1: 
 					w /= l
-				ws[i] = w					
+				ws[i] = w
 			w = np.mean(ws, axis = 0)
 			w *= self.aux_w # in case we could not estimate the weight bounds
 			return w
 		else:
 			return np.zeros(self.p)
-
 
 
 
@@ -1475,7 +1483,7 @@ class GaussianHMM(object):
 			subsequence 2 is y[5:12], subsequence 3 is y[12:30], ...				   
 		'''
 		assert y.ndim==2,"y must be a matrix"
-
+		
 		if idx is None:
 			idx=np.array([[0,y.shape[0]]],dtype=int)		 
 		

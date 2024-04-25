@@ -84,6 +84,11 @@ class Dataset:
 		ts = np.unique(ts)
 		idx_folds = np.array_split(ts, k_folds)
 		self.folds_ts = [(fold[0], fold[-1]) for fold in idx_folds]
+		# print('folds_ts')
+		# for elem in self.folds_ts:
+		# 	print(elem[0], pd.to_datetime(elem[0] * 10**9 ))
+		# 	print(elem[1], pd.to_datetime(elem[1] * 10**9 ))
+		# 	print('-----')
 		return self
 
 	def set_train_test_fold(
@@ -103,10 +108,19 @@ class Dataset:
 
 		for key, data in self.items():
 
+			# print('in set_train_test_fold for %s'%key)
+
 			ts_lower, ts_upper = self.folds_ts[test_index]
+
+			# print('ts_lower: ', pd.to_datetime(ts_lower * 10**9 ))
+			# print('ts_upper: ', pd.to_datetime(ts_upper * 10**9 ))
 			
 			train_data = data.before(ts = ts_lower, create_new = True)
+			# print('data before')
+			# train_data.view()
 			train_data.random_segment(burn_fraction, min_burn_points)
+			# print('data before random segment')
+			# train_data.view()
 			
 			# if path is non sequential add data after the test set
 			if not seq_path:
@@ -115,6 +129,7 @@ class Dataset:
 				train_data.stack(train_data_add)
 
 			test_data = data.between(ts_lower, ts_upper, create_new = True)
+			# test_data.view()
 
 			if train_data.empty or test_data.empty:
 				model_pipes.remove(key)
