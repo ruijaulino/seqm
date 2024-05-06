@@ -108,29 +108,15 @@ class Dataset:
 
 		for key, data in self.items():
 
-			# print('in set_train_test_fold for %s'%key)
-
-			ts_lower, ts_upper = self.folds_ts[test_index]
-
-			# print('ts_lower: ', pd.to_datetime(ts_lower * 10**9 ))
-			# print('ts_upper: ', pd.to_datetime(ts_upper * 10**9 ))
-			
+			ts_lower, ts_upper = self.folds_ts[test_index]			
 			train_data = data.before(ts = ts_lower, create_new = True)
-			# print('data before')
-			# train_data.view()
-			train_data.random_segment(burn_fraction, min_burn_points)
-			# print('data before random segment')
-			# train_data.view()
-			
+			train_data.random_segment(burn_fraction, min_burn_points)			
 			# if path is non sequential add data after the test set
 			if not seq_path:
 				train_data_add = data.after(ts = ts_upper, create_new = True)
 				train_data_add.random_segment(burn_fraction, min_burn_points)
-				train_data.stack(train_data_add)
-
+				train_data.stack(train_data_add, allow_both_empty = True)
 			test_data = data.between(ts_lower, ts_upper, create_new = True)
-			# test_data.view()
-
 			if train_data.empty or test_data.empty:
 				model_pipes.remove(key)
 			else:

@@ -209,12 +209,13 @@ def backward_sample(A,alpha,q,transition_counter,init_state_counter):
 
 class MovingAverage(object):
 
-	def __init__(self, windows = 20, quantile = 0.9, vary_weights = True, **kwargs):
+	def __init__(self, windows = 20, quantile = 0.9, vary_weights = True, reverse_signal = False, **kwargs):
 		self.windows = windows
 		if isinstance(self.windows,int): self.windows = [self.windows]
 		self.windows = np.array(self.windows, dtype = int)
 		self.quantile = quantile		
 		self.vary_weights = vary_weights
+		self.reverse_signal = reverse_signal
 		self.w_norm = np.ones(self.windows.size, dtype = float)
 		self.aux_w = 1
 		self.p = 1
@@ -242,6 +243,7 @@ class MovingAverage(object):
 					m_var = np.nan_to_num(m_var, copy = True, nan = 0.0)
 					m_var[m_var == 0] = np.inf
 					w = m_mean / m_var
+					if self.reverse_signal: w *= -1
 					w = np.sum(np.abs(w),axis = 1)
 					w = w[w!=0]
 					w.sort()
@@ -275,6 +277,7 @@ class MovingAverage(object):
 				ws[i] = w
 			w = np.mean(ws, axis = 0)
 			w *= self.aux_w # in case we could not estimate the weight bounds
+			if self.reverse_signal: w *= -1
 			return w
 		else:
 			return np.zeros(self.p)
