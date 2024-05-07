@@ -2071,6 +2071,678 @@ class ProbCCR(object):
 			return np.dot(self.pred_cov_inv,self.predict(xq))
 
 
+
+
+
+
+class Emission(ABC):
+	
+	@abstractmethod
+	def view(self, plot_hist:bool = False):
+		"""Subclasses must implement this method"""
+		pass		
+		
+	@abstractmethod
+	def set_gibbs_parameters(self, n_gibbs:int, f_burn:float, n_gibbs_sim:int = None):
+		"""Subclasses must implement this method"""
+		pass
+	
+	@abstractmethod
+	def gibbs_initialize(self, y:np.ndarray, x:np.ndarray = None, **kwargs):
+		"""Subclasses must implement this method"""
+		pass
+	
+	@abstractmethod		
+	def gibbs_posterior_sample(self, y:np.ndarray, x:np.ndarray, iteration:int, **kwargs):
+		"""Subclasses must implement this method"""
+		pass
+	
+	@abstractmethod
+	def gibbs_burn_and_mean(self):
+		"""Subclasses must implement this method"""
+		pass
+	
+	@abstractmethod
+	def gibbs_prob(self, y:np.ndarray, x:np.ndarray, iteration:int, **kwargs):
+		"""Subclasses must implement this method"""
+		pass
+	
+	@abstractmethod
+	def prob(self, y:np.ndarray, x:np.ndarray, **kwargs):
+		"""Subclasses must implement this method"""
+		pass
+
+	@abstractmethod
+	def predict_moments(self, xq:np.ndarray, **kwargs):
+		"""Subclasses must implement this method"""
+		pass	
+	@abstractmethod
+	def predict_pi(self, xq:np.ndarray, **kwargs):
+		"""Subclasses must implement this method"""
+		pass	
+
+
+
+	
+class GaussianEmission(Emission):
+	
+	def __init__(self, n_gibbs:int = 100, f_burn:float = 0.1, mean = None, max_k = 0.1):
+		self.n_gibbs = n_gibbs
+		self.f_burn = f_burn
+		self.mean_value = mean
+		self.max_k = max_k
+		self.n_gibbs_sim = int(self.n_gibbs*(1+self.f_burn))		
+		self.p = 1
+		self.w_norm = 1
+		self.gibbs_cov = None
+		self.gibbs_mean = None
+		self.cov = None
+		self.mean = None
+		self.cov_inv = None
+		self.cov_det = None 
+		# auxiliar parameters
+		self.S0aux = None
+		self.invV0, self.invV0m0 = None, None
+		self.prev_mn, self.prev_Vn, self.prev_vn, self.prev_Sn = None, None, None, None 
+
+	def view(self, plot_hist = False):
+		print('** Gaussian Emission **')
+		print('Mean')
+		print(self.mean)
+		print('Covariance')
+		print(self.cov)
+		print()
+		if plot_hist:
+			if self.gibbs_mean is not None:
+				for i in range(self.p):
+					plt.hist(
+							self.gibbs_mean[:,i],
+							density=True,
+							alpha=0.5,
+							label='Mean x%s'%(i+1)
+							)
+				plt.legend()
+				plt.grid(True)
+				plt.show()
+			if self.gibbs_cov is not None:
+				for i in range(self.p):
+					for j in range(i,self.p):
+						plt.hist(
+								self.gibbs_cov[:,i,j],
+								density=True,
+								alpha=0.5,
+								label='Cov(x%s,x%s)'%(i+1,j+1)
+								)
+				plt.legend()
+				plt.grid(True)
+				plt.show()
+
+	def set_gibbs_parameters(self, n_gibbs, f_burn, n_gibbs_sim = None):
+		self.n_gibbs = n_gibbs
+		self.f_burn = f_burn
+		aux = int(self.n_gibbs*(1+self.f_burn))
+		self.n_gibbs_sim = aux if n_gibbs_sim is None else n_gibbs_sim
+			
+	def gibbs_initialize(self, y, **kwargs):
+		assert y.ndim == 2, "y must be a matrix"
+		self.p = y.shape[1]
+		# this will be updated later
+		self.cov = np.eye(self.p)
+		self.mean = np.zeros(self.p)
+		# apply setted value
+		if self.mean_value is not None: 
+			self.mean = self.mean_value*np.ones(self.p)
+		# Covariance samples
+		self.gibbs_cov = np.zeros((self.n_gibbs_sim,self.p,self.p)) 
+		# Mean samples
+		self.gibbs_mean = np.zeros((self.n_gibbs_sim,self.p))  
+
+		# compute data covariance
+		c=np.cov(y.T)
+		# fix when y has only one column
+		if c.ndim==0:
+			c=np.array([[c]])
+		# diagonal matrix with the covariances
+		c_diag=np.diag(np.diag(c))		 
+		# Prior distribution parameters
+		# these parameters make sense for the type of problems
+		# we are trying to solve - assuming zero correlation makes sense
+		# as a prior and zero means as well due to the low 
+		# values of financial returns
+		m0 = np.mean(y, axis = 0) # mean: prior location (just put it at zero...)
+		V0 = c_diag.copy() # mean: prior covariance
+		self.S0aux = c_diag.copy() # covariance prior scale (to be multiplied later)		
+		self.invV0 = np.linalg.inv(V0)
+		self.invV0m0 = np.dot(self.invV0, m0)	
+		
+		# initialize
+		self.gibbs_mean[0] = m0
+		self.gibbs_cov[0] = c		  
+		
+		# store parameters
+		self.prev_mn = m0
+		self.prev_Vn = V0
+		self.prev_vn = self.p+1+1
+		self.prev_Sn = self.S0aux
+
+	def gibbs_posterior_sample(self, y:np.ndarray, iteration:int, **kwargs):
+		'''
+		y: current set of observations
+		'''
+		assert 0<iteration<self.n_gibbs_sim, "iteration is larger than the number of iterations"
+		if y.shape[0] == 0:
+			self.gibbs_mean[iteration] = np.random.multivariate_normal(self.prev_mn, self.prev_Vn)
+			self.gibbs_cov[iteration] = invwishart.rvs(df = self.prev_vn, scale = self.prev_Sn)  
+		else:
+			n = y.shape[0]
+			y_mean_ = np.mean(y, axis=0)
+			# Sample from mean
+			invC = np.linalg.inv(self.gibbs_cov[iteration-1])
+			Vn = np.linalg.inv(self.invV0 + n*invC)
+			mn = np.dot(Vn, self.invV0m0 + n*np.dot(invC,y_mean_))
+			self.prev_mn = mn
+			self.prev_Vn = Vn
+			if self.mean_value is None:
+				self.gibbs_mean[iteration] = np.random.multivariate_normal(mn, Vn)
+			else:
+				self.gibbs_mean[iteration] = self.mean_value*np.ones(self.p)
+			# Sample from cov
+			# Get random k value (shrinkage value)
+			k = np.random.uniform(0, self.max_k)
+			n0 = k*n
+			S0 = n0*self.S0aux
+			v0 = n0 + self.p + 1
+			vn = v0 + n
+			St = np.dot((y-self.gibbs_mean[iteration]).T,(y-self.gibbs_mean[iteration]))
+			Sn = S0 + St
+			self.prev_vn = vn
+			self.prev_Sn = Sn
+			self.gibbs_cov[iteration] = invwishart.rvs(df = vn, scale = Sn)			
+	
+	def gibbs_burn_and_mean(self):
+		self.gibbs_mean = self.gibbs_mean[-self.n_gibbs:,:]
+		self.gibbs_cov = self.gibbs_cov[-self.n_gibbs:,:,:]		
+		self.mean = np.mean(self.gibbs_mean,axis=0)
+		self.cov = np.mean(self.gibbs_cov,axis=0)	
+		self.cov_inv = np.linalg.inv(self.cov)
+		self.cov_det = np.linalg.det(self.cov)
+		self.w_norm = np.sum(np.abs(np.dot(self.cov_inv,self.mean)))		
+	
+	def estimate(self, y:np.ndarray, **kwargs):
+		self.gibbs_initialize(y)
+		for i in range(1, self.n_gibbs_sim):
+			self.gibbs_posterior_sample(y, i)
+		self.gibbs_burn_and_mean()		
+		
+	def gibbs_prob(self, y:np.ndarray, iteration:int, **kwargs):
+		assert 0<iteration<self.n_gibbs_sim, "iteration is larger than the number of iterations"
+		cov_inv = np.linalg.inv(self.gibbs_cov[iteration-1])
+		cov_det = np.linalg.det(self.gibbs_cov[iteration-1])
+		# use vectorized function
+		return mvgauss_prob(y, self.gibbs_mean[iteration-1], cov_inv, cov_det)  
+
+	def prob(self, y:np.ndarray,  **kwargs):		
+		# use vectorized function
+		return mvgauss_prob(y, self.mean, self.cov_inv, self.cov_det)  
+	
+	def predict_moments(self, **kwargs):
+		return self.mean, self.cov
+	
+	def predict_pi(self, **kwargs):
+		return 1
+
+
+
+class ConditionalGaussianEmission(Emission):
+	
+	def __init__(self, n_gibbs:int = 100, f_burn:float = 0.1, mean = None, max_k = 0.1, kelly_std = 2):
+		self.n_gibbs = n_gibbs
+		self.f_burn = f_burn
+		self.mean_value = mean
+		self.max_k = max_k
+		self.kelly_std = kelly_std
+		self.n_gibbs_sim = int(self.n_gibbs*(1+self.f_burn))		
+		self.p = 1
+		self.q = 1
+		self.gibbs_cov = None
+		self.gibbs_mean = None
+		self.cov = None
+		self.mean = None		
+		self.gaussian_emission = GaussianEmission(
+												n_gibbs = n_gibbs,
+												f_burn = f_burn,
+												mean = mean,
+												max_k = max_k
+												)
+		# auxiliar parameters
+		self.S0aux = None
+		self.invV0, self.invV0m0 = None, None
+		self.prev_mn, self.prev_Vn, self.prev_vn, self.prev_Sn = None, None, None, None 
+
+	def view(self, plot_hist = False):
+		print('** Conditional Gaussian Emission **')
+		self.gaussian_emission.view(plot_hist = plot_hist)
+		
+	def set_gibbs_parameters(self, n_gibbs, f_burn, n_gibbs_sim = None):
+		self.gaussian_emission.set_gibbs_parameters(
+													n_gibbs = n_gibbs, 
+													f_burn = f_burn, 
+													n_gibbs_sim = n_gibbs_sim
+													)
+		
+	def gibbs_initialize(self, y, x, **kwargs):
+		assert y.ndim == 2, "y must be a matrix"
+		assert x.ndim == 2, "x must be a matrix"
+				
+		x=x.copy()
+		y=y.copy()
+		
+		self.p = y.shape[1]
+		self.q = x.shape[1]
+		
+		self.y_idx = np.arange(self.p)
+		self.x_idx = np.arange(self.p,self.p+self.q)		
+		
+		z=np.hstack((y,x)) 
+		
+		self.gaussian_emission.gibbs_initialize(y = z)
+		
+		return z
+		
+	def gibbs_posterior_sample(
+								self, 
+								y:np.ndarray, 
+								x:np.ndarray, 
+								iteration:int, 
+								z:np.ndarray = None, 
+								**kwargs
+								):
+		'''
+		y: current set of observations
+		x: current set of observations
+		'''
+		if z is None: z = np.hstack((y,x))		 
+		self.gaussian_emission.gibbs_posterior_sample(y = z, iteration = iteration)
+
+	def gibbs_burn_and_mean(self):
+		self.gaussian_emission.gibbs_burn_and_mean()
+		# compute fields for conditonal distribution
+		self.my = self.gaussian_emission.mean[self.y_idx]
+		self.mx = self.gaussian_emission.mean[self.x_idx]
+		self.Cyy = self.gaussian_emission.cov[self.y_idx][:,self.y_idx]
+		self.Cxx = self.gaussian_emission.cov[self.x_idx][:,self.x_idx]
+		self.Cxx_inv = np.linalg.inv(self.Cxx)
+		self.Cxx_det = np.linalg.det(self.Cxx)
+		self.Cyx = self.gaussian_emission.cov[self.y_idx][:,self.x_idx]
+		self.invCxx = np.linalg.inv(self.Cxx)
+		self.pred_gain = np.dot(self.Cyx, self.invCxx)
+		self.cov_reduct = np.dot(self.pred_gain, self.Cyx.T)
+		self.pred_cov = self.Cyy - self.cov_reduct
+		self.pred_cov_inv = np.linalg.inv(self.pred_cov)			
+		# compute normalization
+		x_move = np.sqrt(np.diag(self.Cxx))*self.kelly_std
+		self.w_norm = np.sum(np.abs(np.dot(self.pred_cov_inv,self.my+np.dot(np.abs(self.pred_gain),x_move + self.mx))))
+
+	def estimate(self, y:np.ndarray, x:np.ndarray, **kwargs):
+		z = self.gibbs_initialize(y = y, x = x)
+		for i in range(1, self.n_gibbs_sim):
+			self.gibbs_posterior_sample(y = y, x = x, iteration = i, z = z)
+		self.gibbs_burn_and_mean()	 
+		
+	def gibbs_prob(self, y:np.ndarray, x:np.ndarray, iteration:int, **kwargs):
+		z = np.hstack((y,x)) 
+		return self.gaussian_emission.gibbs_prob(y = z, iteration = iteration)
+
+	def prob(self, y:np.ndarray, x:np.ndarray,  **kwargs):		
+		# use vectorized function
+		z = np.hstack((y,x)) 
+		return self.gaussian_emission.prob(y = z)
+	
+	def predict_moments(self, xq:np.ndarray, **kwargs):
+		mean = self.my + np.dot(self.pred_gain, xq - self.mx)
+		cov = self.pred_cov + mean*mean[:,None]			
+		return mean, cov
+
+	def predict_pi(self, xq:np.ndarray, **kwargs):
+		assert xq.ndim == 1, "xq must be a vector"
+		return mvgauss_prob(
+					np.array([xq]),
+					self.mx,
+					self.Cxx_inv,
+					self.Cxx_det
+					)[-1]		
+
+
+
+class HMM(object):
+	
+	def __init__(
+				self,
+				emissions:List[Emission] = [],				
+				n_gibbs = 1000,
+				A_zeros = [],
+				emissions_indexes = [],
+				f_burn = 0.1,
+				pred_l = None,
+				**kwargs
+				):
+		'''
+		emissions: list of instances derived from Emission
+				one for each state
+		n_gibbs: number of gibbs samples
+		A_zeros: list of lists with entries of A to be set to zero
+		emissions_indexes: list of lists
+			example
+					emissions_indexes = [[0,2],[1,3]]
+				means 
+					emission[0] is applied to states 0 and 2
+					emission[1] is applied to states 1 and 3
+				also, this implies that the number of states is 4!
+		f_burn: fraction to burn  
+		'''
+		self.emissions = emissions   
+			   
+		self.n_gibbs = n_gibbs
+		self.f_burn = f_burn
+		
+		self.A_zeros = A_zeros
+		
+		self.emissions_indexes = emissions_indexes 
+		if len(self.emissions_indexes) == 0:
+			self.n_states = len(self.emissions)
+			self.emissions_indexes = [[e] for e in range(self.n_states)]   
+		
+		self.n_states = 0 
+		for e in self.emissions_indexes: self.n_states += len(e)
+		self.eff_n_states = len(self.emissions_indexes)	
+		assert self.eff_n_states == len(self.emissions), "emissions do not match groups"
+		# real number of samples to simulate
+		self.n_gibbs_sim = int(self.n_gibbs*(1+self.f_burn))
+		self.pred_l = None
+		self.p = 1
+		self.P = None
+		self.gibbs_P = None
+		self.A = None
+		self.gibbs_A = None
+		self.w_norm = 1
+		# **
+		for emission in self.emissions:
+			emission.set_gibbs_parameters(self.n_gibbs, self.f_burn, self.n_gibbs_sim)
+		# **
+		# Dirichelet prior parameters
+		self.ALPHA = 1
+		self.ZERO_ALPHA = 0.001
+		self.ALPHA_P = 0.05 
+		# A init
+		self.INIT_MASS = 0.9
+
+	def view(self, plot_hist = False):
+		'''
+		plot_hist: if true, plot histograms, otherwise just show the parameters
+		'''
+		print('** Gaussian HMM **')
+		print('Groups')
+		for e in self.emissions_indexes:
+			print('States %s have the same emission'%','.join([str(a) for a in e]))
+		print('Initial state probability')
+		print(self.P)
+		if plot_hist:
+			for i in range(self.n_states):
+				plt.hist(self.gibbs_P[:,i], density=True, alpha=0.5, label='P[%s]'%(i))
+			plt.legend()
+			plt.grid(True)
+			plt.show()
+		print('State transition matrix')
+		print(np.round(self.A,3))
+		print()
+		if plot_hist:
+			for i in range(self.n_states):
+				for j in range(self.n_states):
+					if [i,j] not in self.A_zeros:
+						plt.hist(
+								self.gibbs_A[:,i,j],
+								density=True,
+								alpha=0.5,
+								label='A[%s->%s]'%(i,j)
+								)
+			plt.legend()
+			plt.grid(True)
+			plt.show()
+		for emission in self.emissions:
+			emission.view(plot_hist = plot_hist)
+			 
+	def dirichlet_priors(self):
+		alphas = []
+		for s in range(self.n_states):
+			tmp = self.ALPHA*np.ones(self.n_states)
+			for e in self.A_zeros:
+				if e[0] == s:
+					tmp[e[1]] = self.ZERO_ALPHA
+			alphas.append(tmp)
+		return alphas
+	
+	def estimate(self, y, x = None, idx = None, **kwargs):	 
+		assert y.ndim==2,"y must be a matrix"
+		if x is not None: 
+			assert x.ndim==2,"x must be a matrix"
+			assert y.shape[0] == x.shape[0], "x and y must have the same number of osbervations"		
+		# **
+		# number of observations
+		n = y.shape[0]
+		# idx for multisequence
+		if idx is None:
+			idx = np.array([[0,n]], dtype = int)		
+		# convert to integer to make sure this is well defined
+		idx = np.array(idx, dtype = int)
+		# number of sequences
+		n_seqs = idx.shape[0]
+		# **
+		
+		# **
+		# Dirichlet prior
+		alphas = self.dirichlet_priors()
+		# **
+		
+		# **
+		# Containers
+		# counter for state transitions
+		transition_counter=np.zeros((self.n_states,self.n_states)) 
+		# counter for initial state observations
+		init_state_counter=np.zeros(self.n_states) 
+		# forward alpha
+		forward_alpha=np.zeros((n,self.n_states),dtype=np.float64)
+		# forward normalization variable
+		forward_c=np.zeros(n,dtype=np.float64)
+		# transition matrix samples
+		self.gibbs_A=np.zeros((self.n_gibbs_sim,self.n_states,self.n_states)) 
+		# initial state probability samples
+		self.gibbs_P=np.zeros((self.n_gibbs_sim,self.n_states))
+		# ** 
+		
+		# **
+		# Initialize
+		# assume some persistency of state as a initial parameter		
+		tmp = self.INIT_MASS*np.eye(self.n_states)
+		remaining_mass = (1-self.INIT_MASS)/(self.n_states-1)
+		tmp[tmp == 0] = remaining_mass	
+		# set zeros
+		for e in self.A_zeros:
+			tmp[e[0],e[1]] = 0			
+		tmp /= np.sum(tmp,axis=1)[:,None]
+		self.gibbs_A[0] = tmp
+
+		self.gibbs_P[0] = np.ones(self.n_states)
+		self.gibbs_P[0] /= np.sum(self.gibbs_P[0])		
+		# initialize emissions
+		for emission in self.emissions:
+			emission.gibbs_initialize(y = y, x = x)
+		# **
+
+		# **
+		# create and initialize variable with
+		# the states associated with each variable
+		# assume equal probability in states
+		q=np.random.choice(np.arange(self.n_states,dtype = int),size=n)
+
+		# **
+		prob=np.zeros((n,self.n_states), dtype=np.float64) 
+		# **
+		# Gibbs sampler
+		for i in range(1,self.n_gibbs_sim):
+			# **
+			# set counters to zero
+			transition_counter*=0 
+			init_state_counter*=0 
+			# **
+			# evaluate the probability of each observation
+			for s in range(self.eff_n_states):
+				prob[:,self.emissions_indexes[s]] = self.emissions[s].gibbs_prob(
+																				y = y, 
+																				x = x, 
+																				iteration = i
+																				)[:,None]
+				
+			# **
+			# sample form hidden state variable
+			for l in range(n_seqs):
+				# compute alpha variable
+				forward_alpha,_=forward(
+									prob[idx[l][0]:idx[l][1]],
+									self.gibbs_A[i-1],
+									self.gibbs_P[i-1]
+									)
+				# backward walk to sample from the state sequence
+				backward_sample(
+								self.gibbs_A[i-1],
+								forward_alpha,
+								q[idx[l][0]:idx[l][1]],
+								transition_counter,
+								init_state_counter
+								)
+
+			# **
+			# sample from transition matrix
+			for j in range(self.n_states):				
+				self.gibbs_A[i,j] = np.random.dirichlet(alphas[j]+transition_counter[j])
+			# make sure that the entries are zero!
+			for e in self.A_zeros:
+				self.gibbs_A[i,e[0],e[1]] = 0.
+			self.gibbs_A[i] /= np.sum(self.gibbs_A[i],axis=1)[:,None]
+			# **
+			# sample from initial state distribution
+			
+			
+			self.gibbs_P[i] = np.random.dirichlet(self.ALPHA_P + init_state_counter)   
+			# perform the gibbs step with the state sequence sample q
+			for j in range(self.eff_n_states):
+				idx_states=np.where(np.in1d(q,self.emissions_indexes[j]))[0]
+				self.emissions[j].gibbs_posterior_sample(
+														y = y[idx_states],
+														x = None if x is None else x[idx_states],
+														iteration = i
+														)
+				
+		# burn observations
+		self.gibbs_A=self.gibbs_A[-self.n_gibbs:]
+		self.gibbs_P=self.gibbs_P[-self.n_gibbs:]
+		
+		for emission in self.emissions:
+			emission.gibbs_burn_and_mean()
+		
+		self.A=np.mean(self.gibbs_A,axis=0)
+		self.P=np.mean(self.gibbs_P,axis=0)
+		
+			
+		self.w_norm = 0
+		for j in range(self.eff_n_states):
+			self.w_norm = max(self.w_norm, self.emissions[j].w_norm)
+		# compute the emissions parameters with the samples
+		# self.emissions.gibbs_mean()
+		# self.w_norm = self.emissions.compute_w_norm()
+
+	def next_state_prob(self, y:np.ndarray, x:np.ndarray = None, l:int = None):
+		'''
+		computes a vector with the next state probability
+		given a input sequence
+		xyq: numpy (n,self.p) array with observation
+		l: integer to filter recent data in y -> y=y[-l:]
+		'''
+		assert y.ndim == 2, "y must be a matrix"
+		if x is not None: 
+			assert x.ndim == 2, "x must be a matrix"
+			assert y.shape[0] == x.shape[0], "x and y must have the same number of osbervations"   
+		# just return the initial state probability 
+		if y.shape[0]==0:
+			return self.P
+		assert y.shape[1]==self.p,"y must have the same number of variables as the training data"
+		if l is not None:
+			y = y[-l:]
+			if x is not None: x = x[-l:]
+		
+		n = y.shape[0]
+		prob=np.zeros((n,self.n_states), dtype=np.float64) 
+		# evaluate the probability of each observation
+		for s in range(self.eff_n_states):
+			prob[:,self.emissions_indexes[s]] = self.emissions[s].prob(
+																		y = y, 
+																		x = x,																		 
+																		)[:,None] 
+		alpha, _ = forward(prob, self.A, self.P)
+		next_state_prob = np.dot(self.A.T, alpha[-1])  
+		return next_state_prob	
+
+	def get_weight(
+				self, 
+				y:np.ndarray, 
+				x:np.ndarray = None, 
+				xq:np.ndarray = None, 
+				normalize = True, 
+				**kwargs
+				):
+		'''
+		compute betting weight given an input sequence
+		y: numpy (n,p) array with a sequence
+			each point is a joint observations of the variables
+		l: integer to filter recent data in y -> y=y[-l:]
+		returns:
+			w: numpy (p,) array with weights to allocate to each asset
+			in y
+		'''
+		
+		# next state probability
+		next_state_prob = self.next_state_prob(y, x, self.pred_l)		
+		
+		# group next state prob
+		tmp = np.zeros(self.eff_n_states)
+		for i,e in enumerate(self.emissions_indexes):
+			tmp[i] = np.sum(next_state_prob[e])
+		next_state_prob = tmp
+		
+		# correct weighting of predicitve mixture in case
+		# the hidden states have predictors
+		for i in range(self.eff_n_states):
+			 next_state_prob[i] *= self.emissions[i].predict_pi(xq = xq)
+		next_state_prob /= np.sum(next_state_prob)
+		
+		# build the mixture
+		mixture_mean = np.zeros(self.p)
+		mixture_cov = np.zeros((self.p, self.p))
+		for i in range(self.eff_n_states):
+			mean, cov = self.emissions[i].predict_moments(xq = xq)
+			mixture_mean += next_state_prob[i]*mean
+			mixture_cov += next_state_prob[i]*cov
+			mixture_cov += next_state_prob[i]*mean*mean[:,None]
+		mixture_cov -= mixture_mean*mixture_mean[:,None]
+		
+		w = np.dot(np.linalg.inv(mixture_cov), mixture_mean)
+
+		if normalize:
+			w /= self.w_norm
+		
+		return w		
+
+
+
 if __name__=='__main__':
 	x=np.random.normal(0,1,100)
 	y=np.random.normal(0,1,100)
