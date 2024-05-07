@@ -207,9 +207,10 @@ def backward_sample(A,alpha,q,transition_counter,init_state_counter):
 
 class CompositeModel(object):
 
-	def __init__(self, models_list, models_weights = None, **kwargs):
+	def __init__(self, models_list, models_weights = None, weights_agree = False, **kwargs):
 		self.models_list = models_list
 		self.models_weights = models_weights
+		self.weights_agree = weights_agree
 		if self.models_weights is None:
 			self.models_weights = np.ones(len(self.models_list),dtype = float)
 			self.models_weights /= self.models_weights.size   
@@ -232,6 +233,10 @@ class CompositeModel(object):
 		for model in self.models_list:
 			w.append(model.get_weight(**{'y':y, 'x':x, 'z':z, 'xq':xq}))
 		w = np.vstack(w)
+		if self.weights_agree:
+			w_sign = np.sign(w)
+			agg = (w_sign == w_sign[0]).all(axis=0)
+			w[:,~agg] = 0			
 		w *= self.models_weights[:,None]
 		w = np.sum(w, axis=0)
 		return w
