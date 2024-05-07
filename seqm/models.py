@@ -6,7 +6,7 @@ from numpy.lib.stride_tricks import sliding_window_view
 import tqdm
 from numba import jit
 from abc import ABC, abstractmethod
-
+from typing import List, Union, Dict
 
 # TEMPLATE
 
@@ -2656,6 +2656,7 @@ class HMM(object):
 		self.w_norm = 0
 		for j in range(self.eff_n_states):
 			self.w_norm = max(self.w_norm, self.emissions[j].w_norm)
+		if self.w_norm == 0: self.w_norm = 1
 		# compute the emissions parameters with the samples
 		# self.emissions.gibbs_mean()
 		# self.w_norm = self.emissions.compute_w_norm()
