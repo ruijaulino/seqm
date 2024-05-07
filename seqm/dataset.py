@@ -28,7 +28,7 @@ except ImportError:
 # dict of Data with properties
 class Dataset:
 	def __init__(self, dataset = {}):
-		self.dataset = dataset
+		self.dataset = copy.deepcopy(dataset)
 		# convert dict of DataFrames to Data is necessary
 		for k,v in self.items():
 			if isinstance(v,pd.DataFrame):

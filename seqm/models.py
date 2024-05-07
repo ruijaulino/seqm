@@ -205,6 +205,37 @@ def backward_sample(A,alpha,q,transition_counter,init_state_counter):
 
 
 
+class CompositeModel(object):
+
+	def __init__(self, models_list, models_weights = None, **kwargs):
+		self.models_list = models_list
+		self.models_weights = models_weights
+		if self.models_weights is None:
+			self.models_weights = np.ones(len(self.models_list),dtype = float)
+			self.models_weights /= self.models_weights.size   
+		self.models_weights = np.array(self.models_weights, dtype = float)
+		
+	def view(self, plot_hist=True):
+		pass
+
+	def estimate(self, y, x, z, idx, **kwargs): 
+		'''
+		'''
+		for model in self.models_list:
+			model.estimate(**{'y':y, 'x':x, 'z':z, 'idx':idx})
+
+	def get_weight(self, y, z, xq, x, **kwargs):
+		'''
+		simple moving average prediction
+		'''
+		w = []
+		for model in self.models_list:
+			w.append(model.get_weight(**{'y':y, 'x':x, 'z':z, 'xq':xq}))
+		w = np.vstack(w)
+		w *= self.models_weights[:,None]
+		w = np.sum(w, axis=0)
+		return w
+
 
 
 class MovingAverage(object):
@@ -2126,10 +2157,12 @@ class Emission(ABC):
 	
 class GaussianEmission(Emission):
 	
-	def __init__(self, n_gibbs:int = 100, f_burn:float = 0.1, mean = None, max_k = 0.1):
+	def __init__(self, n_gibbs:int = 100, f_burn:float = 0.1, mean = None, prior_mean_multiple = None, posterior_sign = None, max_k = 0.1):
 		self.n_gibbs = n_gibbs
 		self.f_burn = f_burn
 		self.mean_value = mean
+		self.prior_mean_multiple = prior_mean_multiple
+		self.posterior_sign = posterior_sign
 		self.max_k = max_k
 		self.n_gibbs_sim = int(self.n_gibbs*(1+self.f_burn))		
 		self.p = 1
@@ -2210,6 +2243,10 @@ class GaussianEmission(Emission):
 		# as a prior and zero means as well due to the low 
 		# values of financial returns
 		m0 = np.mean(y, axis = 0) # mean: prior location (just put it at zero...)
+		
+		if self.prior_mean_multiple is not None:
+			m0 = self.prior_mean_multiple*np.std(y, axis = 0)	
+
 		V0 = c_diag.copy() # mean: prior covariance
 		self.S0aux = c_diag.copy() # covariance prior scale (to be multiplied later)		
 		self.invV0 = np.linalg.inv(V0)
@@ -2244,6 +2281,8 @@ class GaussianEmission(Emission):
 			self.prev_Vn = Vn
 			if self.mean_value is None:
 				self.gibbs_mean[iteration] = np.random.multivariate_normal(mn, Vn)
+				if self.posterior_sign is not None:	
+					self.gibbs_mean[iteration] = np.sign(self.posterior_sign)*np.abs(self.gibbs_mean[iteration])
 			else:
 				self.gibbs_mean[iteration] = self.mean_value*np.ones(self.p)
 			# Sample from cov
