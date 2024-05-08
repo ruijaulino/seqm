@@ -243,6 +243,36 @@ class CompositeModel(object):
 
 
 
+
+class EqualWeight(object):
+
+	def __init__(self, **kwargs):
+		self.p = 1
+		self.w = np.array([1], dtype = float)
+	def view(self, plot_hist=True):
+		pass
+
+	def estimate(self, y, **kwargs): 
+		'''
+		The estimate is just to calculate the bounds
+		that the weights can have		
+		'''
+		# calculate the weight bounds
+		if y.ndim == 1: y = y[:,None]
+		self.p = y.shape[1]
+		self.w = np.ones(self.p, dtype = float)
+		self.w /= np.sum(self.w)
+
+	def predict(self, y, **kwargs):
+		pass
+
+	def get_weight(self, y, **kwargs):
+		'''
+		simple moving average prediction
+		'''
+		return self.w
+
+
 class MovingAverage(object):
 
 	def __init__(self, windows = 20, quantile = 0.9, vary_weights = True, reverse_signal = False, **kwargs):
