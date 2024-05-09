@@ -74,6 +74,27 @@ class MeanScaleTransform(BaseTransform):
 		return (data * self.std) + self.mean
 
 
+
+class InvVolPwTransform(seqm.BaseTransform):
+	def __init__(self):
+		self.std = None		
+	def view(self):
+		print('** ScaleTransform **')
+		print('Scale: ', self.std)
+	def pw(self,data):
+		return np.sqrt(np.sum(np.power(1/self.std,2)))
+	def fit(self, data):
+		"""Compute the mean and standard deviation of the data."""
+		self.std = np.std(data, axis=0)
+	def transform(self,data):
+		return data
+	def inverse_transform(self,data):
+		return data
+
+
+
+
+
 class ScaleTransform(BaseTransform):
 	def __init__(self):
 		self.std = None		

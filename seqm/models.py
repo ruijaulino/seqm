@@ -135,6 +135,176 @@ def create_q(n_states,z_lags):
 	return q
 
 
+
+@jit(nopython=True)
+def nig_track(y: np.ndarray, phi_m:float = 0.95, phi_v:float = 0.95, window_init:int = 10):
+	assert y.ndim == 1, "y must be a vector"
+	assert y.size > 2*window_init, "not enough observations in y"
+	n = y.size
+	mean = np.zeros(n, dtype = np.float64)
+	var = np.ones(n, dtype = np.float64)
+	a = 1 + 1 / ( 2 * ( 1 - phi_v ) )
+	m = np.mean(y[:window_init])
+	v = np.var(y[:window_init])
+	b = v * ( a - 1 )
+	for i in range(window_init, n):
+		b = phi_v * ( b + 0.5 * ( y[i] - m ) * ( y[i] - m ) )
+		m = phi_m * m + (1 - phi_m) * y[i]
+		mean[i] = m
+		var[i] = b / ( a - 1 )
+	return mean, var
+
+
+
+@jit(nopython=True)
+def nig_vi_track(
+				y: np.ndarray, 
+				phi_m:float = 0.95, 
+				phi_v:float = 0.95, 
+				window_init:int = 10,
+				n_iter:int = 50,
+				tol:float = 1e-6
+				):
+	assert y.ndim == 1, "y must be a vector"
+	assert y.size > 2*window_init, "not enough observations in y"
+	
+	n = y.size
+	mean = np.zeros(n, dtype = np.float64)
+	var = np.ones(n, dtype = np.float64)
+
+	a = 1 + 1 / ( 2 * ( 1 - phi_v ) )
+	m = np.mean(y[:window_init])
+	v = np.var(y[:window_init])
+	
+	b = phi_v * v * ( a - 1 )
+	q = v * (1 - phi_v)
+	
+	for i in range(window_init, n):
+		b_iter = phi_v * float(b)
+		m_iter = float(m)
+		q_iter = float(q) / phi_m  
+		prev_s = b / a		
+		for j in range(n_iter):
+			s = b / a
+			b = b_iter + 0.5 * ( y[i]*y[i] - 2*y[i]*m + q + m*m )
+			m = ( q_iter*y[i] + m_iter*s ) / ( q + s )
+			q = q_iter * s / ( q_iter + s )
+			# check for stopping
+			s = b / a
+			if np.abs( s / prev_s - 1 ) < tol:
+				break
+			prev_s = s
+		# store		
+		mean[i] = m
+		var[i] = b / ( a - 1 )
+	return mean, var
+
+
+
+
+
+class NIGTrack(object):
+	def __init__(self, 
+				 phi_m:float, 
+				 phi_v:float, 
+				 window_init:int = 20, 
+				 vi:bool = False,
+				 optimize:bool = False,
+				 n_iter:int = 50, 
+				 tol:float = 1e-6, 
+				):
+		self.phi_m = phi_m
+		self.phi_v = phi_v
+		self.window_init = window_init
+		self.vi = vi
+		self.optimize = optimize
+		self.n_iter = n_iter
+		self.tol = tol
+		self.aux_w = 1
+		self.w_norm = 1
+		
+		self.phi_m_values = np.linspace(0.8,0.98,20)
+		self.phi_v_values = np.linspace(0.8,0.98,20)
+		
+	
+	def track(self, y: np.ndarray, phi_m:float = None, phi_v:float = None):
+		assert y.ndim == 1, "y must be a vector"
+		if phi_m is None: phi_m = self.phi_m
+		if phi_v is None: phi_v = self.phi_v
+		if self.vi:
+			return nig_vi_track(
+							y = y, 
+							phi_m = phi_m, 
+							phi_v = phi_v,
+							window_init = self.window_init,
+							n_iter = self.n_iter,
+							tol = self.tol
+							)
+		else:
+			return nig_track(
+							y = y, 
+							phi_m = phi_m, 
+							phi_v = phi_v,
+							window_init = self.window_init
+							)
+	
+	def estimate(self, y, **kwargs): 
+		assert y.ndim == 2, "y must be a matrix"
+		assert y.shape[1] == 1, "this model only works for a single return sequence"		
+		if y.shape[0] <= 2*self.window_init:
+			self.aux_w = 0
+		else:
+			y = y[:,0]
+			if self.optimize:
+				y_eval = y[1:]
+				ml = -np.inf
+				opt_phi_m = 0.95
+				opt_phi_v = 0.95
+				for i in range(self.phi_m_values.size):
+					for j in range(self.phi_v_values.size):						
+						m, v = self.track(
+										y = y, 
+										phi_m = self.phi_m_values[i],
+										phi_v = self.phi_v_values[j]
+										)
+						m = m[:-1]
+						v = v[:-1]
+						logl = -0.5*( np.sum(np.log(v)) + np.sum(np.power(y_eval-m,2)/v) )
+
+						if logl > ml:
+							ml = logl
+							opt_phi_m = self.phi_m_values[i]
+							opt_phi_v = self.phi_v_values[j]
+				self.phi_m = opt_phi_m
+				self.phi_v = opt_phi_v
+				print(self.phi_m, self.phi_v)
+			
+			# compute mean and variance on the training data
+			m, v = self.track(y)
+			# eliminate initial points
+			m = m[self.window_init:]
+			v = v[self.window_init:]
+			self.w_norm = np.max(m/v)
+	
+	def get_weight(self, y, **kwargs):
+		assert y.ndim == 2, "y must be a matrix"
+		assert y.shape[1] == 1, "this model only works for a single return sequence"		
+		if y.shape[0] <= 2*self.window_init:
+			return np.zeros(1)
+		else:
+			# compute mean and variance on the training data
+			m, v = self.track(y[:,0])
+			# eliminate initial points
+			m = m[self.window_init:]
+			v = v[self.window_init:]
+			w = m[-1]/v[-1]
+			w /= self.w_norm
+			if np.abs(w) > 1: w = np.sign(w)				
+			w = np.array(w)
+			return w
+
+
+
 # this can be compiled
 @jit(nopython=True)
 def forward(prob,A,P):
@@ -302,6 +472,7 @@ class MovingAverage(object):
 			if y.shape[0] < 2*np.max(self.windows):
 				self.aux_w = 0 # to multiply weights by zero on get_weight			
 			else:
+				# print(self.windows, y.shape)
 				for i in range(self.windows.size):
 					m_mean = np.mean(sliding_window_view(y, window_shape = self.windows[i], axis = 0 ), axis=-1)
 					m_var = np.var(sliding_window_view(y, window_shape = self.windows[i], axis = 0 ), axis=-1)
@@ -311,11 +482,14 @@ class MovingAverage(object):
 					w = m_mean / m_var
 					if self.reverse_signal: w *= -1
 					w = np.sum(np.abs(w),axis = 1)
+					# print(w)
 					w = w[w!=0]
+					# print(w)
 					w.sort()
 					w_norm = w[int(self.quantile*w.size)]
 					if w_norm == 0: w_norm = np.inf
 					self.w_norm[i] = w_norm
+				# print('-------------')
 
 	def predict(self, y, **kwargs):
 		pass
