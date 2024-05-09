@@ -36,11 +36,13 @@ class ModelPipe:
 				x_transform:BaseTransform = None, 
 				y_transform:BaseTransform = None,
 				model = None, 
+				w_precision = 0.0001,
 				key: str = ''
 				):
 		self.model=copy.deepcopy(model)
 		self.x_transform = copy.deepcopy(x_transform) if x_transform is not None else IdleTransform()  # Store the class, not an instance
 		self.y_transform = copy.deepcopy(y_transform) if y_transform is not None else IdleTransform()  # Store the class, not an instance
+		self.w_precision = w_precision
 		self.key = key or 'Dataset'
 		self.s,self.w,self.pw = None,None,None
 		self.train_data, self.test_data = None,None
@@ -178,6 +180,7 @@ class ModelPipe:
 									apply_transform_x = True, 
 									apply_transform_y = True
 									)
+				w = np.sign(w) * np.round( np.abs(w) / self.w_precision ) * self.w_precision
 				self.w[i] = w
 				self.s[i] = np.dot(self.test_data.y[i], w)
 				self.pw[i] = self.get_pw(self.test_data.y[:i])

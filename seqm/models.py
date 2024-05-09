@@ -283,8 +283,12 @@ class NIGTrack(object):
 			# eliminate initial points
 			m = m[self.window_init:]
 			v = v[self.window_init:]
+			v[np.where(v == 0)] = np.inf
 			self.w_norm = np.max(m/v)
-	
+			if self.w_norm == 0:
+				self.w_norm = 1
+				self.aux_w = 0
+
 	def get_weight(self, y, **kwargs):
 		assert y.ndim == 2, "y must be a matrix"
 		assert y.shape[1] == 1, "this model only works for a single return sequence"		
@@ -296,10 +300,12 @@ class NIGTrack(object):
 			# eliminate initial points
 			m = m[self.window_init:]
 			v = v[self.window_init:]
+			if v[-1] == 0: v[-1] = np.inf
 			w = m[-1]/v[-1]
 			w /= self.w_norm
 			if np.abs(w) > 1: w = np.sign(w)				
 			w = np.array(w)
+			w *= self.aux_w
 			return w
 
 
