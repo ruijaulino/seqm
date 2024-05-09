@@ -277,7 +277,6 @@ class NIGTrack(object):
 							opt_phi_v = self.phi_v_values[j]
 				self.phi_m = opt_phi_m
 				self.phi_v = opt_phi_v
-				print(self.phi_m, self.phi_v)
 			
 			# compute mean and variance on the training data
 			m, v = self.track(y)
