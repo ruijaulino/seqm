@@ -75,7 +75,7 @@ class MeanScaleTransform(BaseTransform):
 
 
 
-class InvVolPwTransform(seqm.BaseTransform):
+class InvVolPwTransform(BaseTransform):
 	def __init__(self):
 		self.std = None		
 	def view(self):
