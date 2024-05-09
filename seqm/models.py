@@ -479,8 +479,9 @@ class MovingAverage(object):
 			else:
 				# print(self.windows, y.shape)
 				for i in range(self.windows.size):
-					m_mean = np.mean(sliding_window_view(y, window_shape = self.windows[i], axis = 0 ), axis=-1)
-					m_var = np.var(sliding_window_view(y, window_shape = self.windows[i], axis = 0 ), axis=-1)
+					y_view = sliding_window_view(y, window_shape = self.windows[i], axis = 0 )
+					m_mean = np.mean(y_view, axis=-1)
+					m_var = np.var(y_view, axis=-1)
 					m_mean = np.nan_to_num(m_mean, copy = True, nan = 0.0)
 					m_var = np.nan_to_num(m_var, copy = True, nan = 0.0)
 					m_var[m_var == 0] = np.inf
