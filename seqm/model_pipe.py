@@ -29,6 +29,12 @@ def does_cls_have_method(cls_instance, method: str) -> bool:
 			return False
 
 
+
+def round_weight(w:np.ndarray, w_precision:float = 0.0001) -> np.ndarray:
+	return np.sign(w) * np.round( np.abs(w) / w_precision ) * w_precision
+
+
+
 class ModelPipe:
 	
 	def __init__(
@@ -180,7 +186,7 @@ class ModelPipe:
 									apply_transform_x = True, 
 									apply_transform_y = True
 									)
-				w = np.sign(w) * np.round( np.abs(w) / self.w_precision ) * self.w_precision
+				w = round_weight(w = w, w_precision = self.w_precision)
 				self.w[i] = w
 				self.s[i] = np.dot(self.test_data.y[i], w)
 				self.pw[i] = self.get_pw(self.test_data.y[:i])
