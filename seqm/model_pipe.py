@@ -29,10 +29,8 @@ def does_cls_have_method(cls_instance, method: str) -> bool:
 			return False
 
 
-
 def round_weight(w:np.ndarray, w_precision:float = 0.0001) -> np.ndarray:
 	return np.sign(w) * np.round( np.abs(w) / w_precision ) * w_precision
-
 
 
 class ModelPipe:
@@ -43,7 +41,7 @@ class ModelPipe:
 				y_transform:BaseTransform = None,
 				model = None, 
 				w_precision = 0.0001,
-				key: str = ''
+				key: str = 'no key defined'
 				):
 		self.model=copy.deepcopy(model)
 		self.x_transform = copy.deepcopy(x_transform) if x_transform is not None else IdleTransform()  # Store the class, not an instance
@@ -52,6 +50,14 @@ class ModelPipe:
 		self.key = key or 'Dataset'
 		self.s,self.w,self.pw = None,None,None
 		self.train_data, self.test_data = None,None
+		self.train_pw = None
+
+	def view(self):
+		print('-- Model Pipe %s --'%self.key)
+		print(' = Portfolio weight = ')
+		print(self.train_pw)
+		print(' = Model = ')
+		self.model.view()
 
 	def get_s_df(self):
 		if self.s is not None:
@@ -128,7 +134,9 @@ class ModelPipe:
 	# estimate model
 	def estimate(self, **kwargs):
 		"""Train the model using the training data contained within this DataElement."""
-		self.model.estimate(**self.train_data.build_train_inputs())
+		aux = self.train_data.build_train_inputs()
+		self.model.estimate(**aux)
+		self.train_pw = self.get_pw(aux.get('y'))
 		return self
 
 	# get weight
@@ -203,6 +211,12 @@ class ModelPipes:
 		# as it's model
 		self.master_model = copy.deepcopy(master_model)
 		self.models = {}
+
+	def view(self):
+		for k,v in self.items():
+			v.view()
+			print()
+			print()
 
 	def add(self, key, item: ModelPipe):
 		if not isinstance(item, ModelPipe):
