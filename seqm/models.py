@@ -532,7 +532,7 @@ class MovingAverage(object):
 
 # MODELS
 class Gaussian(object):
-	def __init__(self,n_gibbs=None,f_burn=0.1,min_k=0.25,max_k=0.25,names=None):
+	def __init__(self,n_gibbs=None,f_burn=0.1,min_k=0.25,max_k=0.25,names=None, min_abs_mean = 0):
 		self.f_burn=f_burn
 		self.n_gibbs=n_gibbs
 		self.no_gibbs=False
@@ -543,6 +543,7 @@ class Gaussian(object):
 		self.min_k=min_k
 		self.max_k=max_k
 		self.names=names
+		self.min_abs_mean = min_abs_mean
 		# real number of samples to simulate
 		self.n_gibbs_sim=int(self.n_gibbs*(1+self.f_burn))
 		self.p=1
@@ -592,6 +593,7 @@ class Gaussian(object):
 		
 		if self.no_gibbs:
 			self.mean=np.mean(y,axis=0)
+			self.mean[np.abs(self.mean) < self.min_abs_mean] = 0
 			self.cov=np.cov(y.T)
 			if self.cov.ndim==0:
 				self.cov=np.array([[self.cov]])				
@@ -642,6 +644,7 @@ class Gaussian(object):
 			self.gibbs_mean=self.gibbs_mean[-self.n_gibbs:]
 			self.gibbs_cov=self.gibbs_cov[-self.n_gibbs:]
 			self.mean=np.mean(self.gibbs_mean,axis=0)
+			self.mean[np.abs(self.mean) < self.min_abs_mean] = 0
 			self.cov=np.mean(self.gibbs_cov,axis=0)
 			self.cov_inv=np.linalg.inv(self.cov)
 			self.w=np.dot(self.cov_inv,self.mean)
@@ -655,20 +658,21 @@ class Gaussian(object):
 
 
 class StateGaussian(object):
-	def __init__(self,n_gibbs=None,f_burn=0.1,min_k=0.25,max_k=0.25,min_points=10,set_state_to_zero=[]):
-		self.n_gibbs=n_gibbs
-		self.no_gibbs=False
+	def __init__(self, n_gibbs = None, f_burn = 0.1, min_k = 0.25, max_k = 0.25, min_points = 10, set_state_to_zero=[], min_abs_mean = 0):
+		self.n_gibbs = n_gibbs
+		self.no_gibbs = False
 		if self.n_gibbs is None:
-			self.no_gibbs=True
-		self.f_burn=f_burn
-		self.max_k=max_k
-		self.min_k=min_k
-		self.min_points=min_points
-		self.gaussians={}
-		self.default_w=0
-		self.p=1
-		self.max_w_norm=1
-		self.set_state_to_zero=set_state_to_zero
+			self.no_gibbs = True
+		self.f_burn = f_burn
+		self.max_k = max_k
+		self.min_k = min_k
+		self.min_points = min_points
+		self.gaussians = {}
+		self.default_w = 0
+		self.p = 1
+		self.max_w_norm = 1
+		self.set_state_to_zero = set_state_to_zero
+		self.min_abs_mean = min_abs_mean
 
 	def view(self,plot_hist=True):
 		print('StateGaussian')
@@ -681,26 +685,24 @@ class StateGaussian(object):
 
 	def estimate(self,y,z,**kwargs):
 
-		self.max_w_norm=0
-		self.p=y.shape[1]
-		n=y.shape[0]
+		self.max_w_norm = 0
+		self.p = y.shape[1]
+		n = y.shape[0]
 		
-		if z.ndim!=1:
-			z=z[:,None]
+		if z.ndim != 1:
+			z = z[:,None]
 
-		#if z is None:
-		#	z=np.zeros(n,dtype=int)
-		# assert z.ndim==1,"z must be a vector"
-		z=np.array(z,dtype=int)
-		uz=np.unique(z)
+		z = np.array(z, dtype = int)
+		uz = np.unique(z)
 		for e in uz:
-			g=Gaussian(self.n_gibbs,self.f_burn,self.min_k,self.max_k)
-			i=np.where(z==e)[0]
-
-			if i.size>self.min_points:
+			g = Gaussian(self.n_gibbs, self.f_burn, self.min_k, self.max_k, min_abs_mean = self.min_abs_mean)
+			i = np.where(z == e)[0]
+			if i.size > self.min_points:
 				g.estimate(y[i])
 				self.gaussians.update({e:g})
-				self.max_w_norm=max(self.max_w_norm,g.w_norm)
+				
+				self.max_w_norm = max(self.max_w_norm,g.w_norm)
+		if self.max_w_norm == 0: self.max_w_norm = 1
 
 	def get_weight(self,z,**kwargs):
 		
@@ -715,8 +717,6 @@ class StateGaussian(object):
 			return self.default_w*np.ones(self.p)
 		else:
 			return g.get_weight(normalize=False)/self.max_w_norm
-
-
 
 
 class ConditionalGaussian(object):
