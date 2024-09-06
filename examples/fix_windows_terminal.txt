@@ -1,0 +1,28 @@
+
+# first run
+set PROMPT=$e]9;9;$P$e\%PROMPT%
+and
+setx PROMPT "%PROMPT%"
+
+then add to action in the json file
+
+        {
+            "command": 
+            {
+                "action": "splitPane",
+                "split": "auto",
+                "split": "vertical",
+                "splitMode": "duplicate"
+            },
+            "keys": "alt+shift+*"
+        },   
+        {
+            "command": 
+            {
+                "action": "splitPane",
+                "split": "auto",
+                "split": "horizontal",
+                "splitMode": "duplicate"
+            },
+            "keys": "alt+shift+-"
+        },                                       
