@@ -79,8 +79,8 @@ def performance_summary(s,sr_mult,pct_fee=0):
 	print('Sharpe: ', sr_mult*np.mean(s)/np.std(s))
 	print()
 
-def equity_curve(s,ts,color='g',pct_fee=0):
-	title='Equity curves' if pct_fee == 0 else 'Equity curves FEE=%s'%pct_fee
+def equity_curve(s,ts,color='g',pct_fee=0, title:str = 'Equity curve'):
+	title=title if pct_fee == 0 else title+' FEE=%s'%pct_fee
 	s_df=pd.DataFrame(np.cumsum(s,axis=0),index=ts)
 	s_df.plot(color=color,title=title,legend=False)	
 	plt.grid(True)
@@ -178,56 +178,75 @@ def post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr
 	performance_summary(s,sr_mult,pct_fee=pct_fee)
 	
 
-def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,view_weights=True,use_pw=True,multiplier=1,start_date='',end_date='',*args,**kwargs):
-
+def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,view_weights=True,use_pw=True,multiplier=1,start_date='',end_date='', n_boot_datasets:int = None, *args, **kwargs):
+ 
 	paths = filter_paths(paths,start_date,end_date)
 
-
 	keys = [k for k in paths[0]]
+
+	if not n_boot_datasets: n_boot_datasets = 1
 
 	paths_s=[]
 	paths_pw=[]
 	paths_leverage=[]
 	paths_n_datasets=[]
+
+	paths_s_datasets_boot = []
 	for path in paths:
-		path_s=[]
-		path_pw=[]
-		path_w_abs_sum=[] # to build leverage
-		for key in keys:
-			df=path.get(key)
-			s=df[[STRATEGY_COLUMN]]
-			w=df.iloc[:, df.columns.str.startswith(WEIGHT_PREFIX_COLUMNS)]
-			pw=df[[PORTFOLIO_WEIGHT_COLUMN]]
-			if not use_pw:
-				pw=pd.DataFrame(np.ones_like(pw.values),columns=pw.columns,index=pw.index)			
-			s=pd.DataFrame(calculate_fees(s.values,w.values[:,:,None],seq_fees,pct_fee),columns=s.columns,index=s.index)
-			path_s.append(s)
-			path_pw.append(pw)
-			path_w_abs_sum.append(pd.DataFrame(w.abs().sum(axis=1),columns=[key]))
 
-		path_s=pd.concat(path_s,axis=1)
-		path_pw=pd.concat(path_pw,axis=1)
-		path_w_abs_sum=pd.concat(path_w_abs_sum,axis=1)
-		path_s.columns=keys
-		path_pw.columns=keys
-		path_w_abs_sum.columns=keys
-		# fill na with zero
-		path_s=path_s.fillna(0)
-		path_pw=path_pw.fillna(0)
-		path_w_abs_sum=path_w_abs_sum.fillna(0)
 
-		path_pw/=np.sum(np.abs(path_pw),axis=1).values[:,None]
-		path_pw*=multiplier
-		non_zero_counts = path_pw.apply(lambda row: (row != 0).sum(), axis=1)
-		paths_n_datasets.append(pd.DataFrame(non_zero_counts,columns=['n']))
-	
-		path_s=pd.DataFrame(np.sum(path_s*path_pw,axis=1),columns=['s'])
-		paths_s.append(path_s)
+		for k in range(n_boot_datasets):
 
-		paths_leverage.append(pd.DataFrame(np.sum(path_w_abs_sum*path_pw,axis=1),columns=['s']))
-		paths_pw.append(path_pw)
+			# at least the first is always with the full dataset
+			if k == 0:
+				keys_sample = keys
+			else:
+				keys_sample = list(set(np.random.choice(keys, len(keys))))
+
+			path_s=[]
+			path_pw=[]
+			path_w_abs_sum=[] # to build leverage
+			for key in keys_sample:
+				df=path.get(key)
+				s=df[[STRATEGY_COLUMN]]
+				w=df.iloc[:, df.columns.str.startswith(WEIGHT_PREFIX_COLUMNS)]
+				pw=df[[PORTFOLIO_WEIGHT_COLUMN]]
+				if not use_pw:
+					pw=pd.DataFrame(np.ones_like(pw.values),columns=pw.columns,index=pw.index)			
+				s=pd.DataFrame(calculate_fees(s.values,w.values[:,:,None],seq_fees,pct_fee),columns=s.columns,index=s.index)
+				path_s.append(s)
+				path_pw.append(pw)
+				path_w_abs_sum.append(pd.DataFrame(w.abs().sum(axis=1),columns=[key]))
+
+			path_s=pd.concat(path_s,axis=1)
+			path_pw=pd.concat(path_pw,axis=1)
+			path_w_abs_sum=pd.concat(path_w_abs_sum,axis=1)
+			path_s.columns=keys_sample
+			path_pw.columns=keys_sample
+			path_w_abs_sum.columns=keys_sample
+			# fill na with zero
+			path_s=path_s.fillna(0)
+			path_pw=path_pw.fillna(0)
+			path_w_abs_sum=path_w_abs_sum.fillna(0)
+
+			path_pw/=np.sum(np.abs(path_pw),axis=1).values[:,None]
+			path_pw*=multiplier
+			non_zero_counts = path_pw.apply(lambda row: (row != 0).sum(), axis=1)
+		
+			path_s=pd.DataFrame(np.sum(path_s*path_pw,axis=1),columns=['s'])
+
+			paths_s_datasets_boot.append(path_s)
+
+			if k == 0:
+				paths_s.append(path_s)
+				paths_pw.append(path_pw)
+				paths_leverage.append(pd.DataFrame(np.sum(path_w_abs_sum*path_pw,axis=1),columns=['s']))
+				paths_n_datasets.append(pd.DataFrame(non_zero_counts,columns=['n']))
+				
+			
 
 	s=pd.concat(paths_s,axis=1)
+
 	w=np.stack([e.values for e in paths_pw],axis=2)
 	lev=pd.concat(paths_leverage,axis=1)
 	n_datasets=pd.concat(paths_n_datasets,axis=1)
@@ -235,7 +254,11 @@ def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fee
 	ts=s.index
 	s=s.values
 
-	equity_curve(s,ts,color='g',pct_fee=pct_fee)	
+	equity_curve(s,ts,color='g',pct_fee=pct_fee)
+
+	if n_boot_datasets > 1:
+		s_dataset_boot = pd.concat(paths_s_datasets_boot,axis=1)
+		equity_curve(s_dataset_boot,s_dataset_boot.index,color='g',pct_fee=pct_fee, title = 'Equity curve dataset bootstrap')
 	
 	returns_distribution(s,pct_fee=pct_fee,bins=50)
 	
