@@ -232,14 +232,20 @@ class NIGTrack(object):
 		if phi_m is None: phi_m = self.phi_m
 		if phi_v is None: phi_v = self.phi_v
 		if self.vi:
-			return nig_vi_track(
-							y = y, 
-							phi_m = phi_m, 
-							phi_v = phi_v,
-							window_init = self.window_init,
-							n_iter = self.n_iter,
-							tol = self.tol
-							)
+			try:
+				mean, var = nig_vi_track(
+								y = y, 
+								phi_m = phi_m, 
+								phi_v = phi_v,
+								window_init = self.window_init,
+								n_iter = self.n_iter,
+								tol = self.tol
+								)
+			except:
+				n = y.size
+				mean = np.zeros(n, dtype = np.float64)
+				var = np.ones(n, dtype = np.float64)
+			return mean, var
 		else:
 			return nig_track(
 							y = y, 
@@ -308,6 +314,130 @@ class NIGTrack(object):
 			w *= self.aux_w
 			return w
 
+
+
+class TFLRBase(object):
+	def __init__(self, kelly_std:float = 2, max_w:float = 1, k_div:int = None):
+		self.max_w = max_w
+		self.kelly_std = kelly_std
+		self.k_div = k_div
+		self.lr_coeffs = None
+		self.vr_coeffs = None
+		self.x_view = None
+		self.var_view = None
+		self.var_est_view = None
+		
+	def estimate(self, y, x, **kwargs): 
+		x = x.copy()
+		y = y.copy()
+		if x.ndim == 2: x = x[:, 0]
+		if y.ndim == 2: y = y[:, 0]
+		
+		n = x.size
+		
+		# linear regression y = a+b*x
+		X = np.hstack((np.ones((n, 1)),x[:,None]))		
+		self.lr_coeffs = np.dot(np.linalg.inv(np.dot(X.T, X)),np.dot(X.T, y))
+		
+		# variance regression v = c + d*|x-xm|
+		# divide domain and compute changing variance
+		# assume that the linear relation is very weak
+		# and so we can just look at the behaviour of y
+		k = self.k_div
+		if not k: k = int(np.sqrt(n))
+		xs = np.sort(x)
+		xss = np.array_split(xs, k)
+		buckets = np.zeros(k)
+		for i in range(k-1):
+			buckets[i] = xss[i][0]
+		buckets[k-1] = xss[k-1][-1]
+		var = np.zeros(k-1)
+		for i in range(k-1):
+			tmp = y[np.logical_and(x>buckets[i], x<buckets[i+1])]
+			if tmp.size:
+				var[i] = np.var(tmp)
+			else:
+				var[i] = np.nan
+		idx = ~np.isnan(var)
+		x_est = (buckets[1:]+buckets[:-1])/2
+		var = var[idx]
+		# quadratic model here
+		m = x_est.size
+		X = np.hstack((np.ones((m, 1)),x_est[:, None],np.power(x_est, 2)[:, None]))		
+		self.vr_coeffs = np.dot(np.linalg.inv(np.dot(X.T, X)),np.dot(X.T, var))		
+		
+		self.x_view = x_est
+		self.var_view = var
+		self.var_est_view = np.dot(X, self.vr_coeffs)
+		
+		
+		# compute normalization
+		# 
+		m = 500
+		x_ = np.linspace(x_est[0], x_est[-1], m)
+		X_ = np.hstack((np.ones((m, 1)),x_[:, None],np.power(x_, 2)[:, None]))	   
+		mu = self.lr_coeffs[0] + self.lr_coeffs[1]*x_
+		v = np.dot(X_, self.vr_coeffs)# reuse X
+		w = mu / v
+
+		self.w_norm = np.max(np.abs(w))
+
+	def view(self, **kwargs):
+		print('Linear regression coeffs')
+		print(self.lr_coeffs)
+		print('Variance regression coeffs')
+		print(self.vr_coeffs)
+		plt.title('Variance estimate')
+		plt.plot(self.x_view, self.var_view, '.', label = 'Samples')
+		plt.plot(self.x_view, self.var_est_view, '-', label = 'Model')
+		plt.grid(True)
+		plt.xlabel('Feature')
+		plt.ylabel('Variance')
+		plt.legend()
+		plt.show()
+		
+	def get_weight(self, xq, normalize = True, **kwargs):
+		if isinstance(xq, np.ndarray):
+			xq = xq[0]
+		if isinstance(xq, np.ndarray):
+			xq = xq[0]			
+		mu = self.lr_coeffs[0] + self.lr_coeffs[1]*xq
+		v = np.dot([1, xq, xq*xq], self.vr_coeffs)
+		w = mu / v
+		if normalize:
+			w = w/self.w_norm
+			d = np.abs(w)
+			if d > self.max_w:
+				w /= d
+				w *= self.max_w
+			return np.array([w])
+		else:
+			return np.array([w])
+		
+class TFLR(object):
+	def __init__(self, kelly_std:float = 2, max_w:float = 1, k_div:int = None):
+		self.models = []
+		self.max_w = max_w
+		self.kelly_std = kelly_std
+		self.k_div = k_div		
+	def estimate(self, y, x, **kwargs):		 
+		# make model for each feature
+		x = np.copy(x)
+		if x.ndim == 1: x = x[:,None]
+		p = x.shape[1]
+		for i in range(p):
+			m = TFLRBase(kelly_std = self.kelly_std, max_w = self.max_w, k_div = self.k_div)
+			m.estimate(y = y, x = x[:,i])
+			self.models.append(m)
+	def get_weight(self, xq, normalize = True, **kwargs):
+		if not isinstance(xq, np.ndarray): 
+			xq = np.array([xq])
+		w = np.zeros(len(self.models))
+		for i in range(len(self.models)):
+			w[i] = self.models[i].get_weight(xq[i])
+		return np.mean(w)
+	def view(self, **kwards):
+		for m in self.models: m.view()
 
 
 # this can be compiled
