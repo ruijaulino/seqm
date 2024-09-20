@@ -57,4 +57,4 @@ if __name__=='__main__':
 					view_models=False
 					)
 
-	portfolio_post_process(paths)
+	portfolio_post_process(paths, pct_fee = {'dataset 1':0, 'dataset 2':0.5,'dataset 3':0})

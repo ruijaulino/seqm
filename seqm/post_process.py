@@ -144,6 +144,13 @@ def post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr
 		print('No paths to process!')
 		return
 	keys = [k for k in paths[0]]
+
+	# transform into dict
+	if not isinstance(pct_fee, dict):
+		tmp = {}
+		for k in keys: tmp.update({k:pct_fee})
+		pct_fee = tmp
+
 	# by default use the results for the first dataframe used as input
 	# this will work by default because, in general, there is only one
 	key = key if key is not None else keys[0]
@@ -163,7 +170,7 @@ def post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr
 	# stack arrays
 	s=np.hstack(s)
 	w=np.stack(w,axis=2)
-	s=calculate_fees(s,w,seq_fees,pct_fee)
+	s=calculate_fees(s,w,seq_fees,pct_fee.get(key, 0))
 
 	# post processing
 	
@@ -184,6 +191,12 @@ def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fee
 
 	keys = [k for k in paths[0]]
 
+	# transform into dict
+	if not isinstance(pct_fee, dict):
+		tmp = {}
+		for k in keys: tmp.update({k:pct_fee})
+		pct_fee = tmp
+
 	if not n_boot_datasets: n_boot_datasets = 1
 
 	paths_s=[]
@@ -193,8 +206,6 @@ def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fee
 
 	paths_s_datasets_boot = []
 	for path in paths:
-
-
 		for k in range(n_boot_datasets):
 
 			# at least the first is always with the full dataset
@@ -213,7 +224,7 @@ def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fee
 				pw=df[[PORTFOLIO_WEIGHT_COLUMN]]
 				if not use_pw:
 					pw=pd.DataFrame(np.ones_like(pw.values),columns=pw.columns,index=pw.index)			
-				s=pd.DataFrame(calculate_fees(s.values,w.values[:,:,None],seq_fees,pct_fee),columns=s.columns,index=s.index)
+				s=pd.DataFrame(calculate_fees(s.values,w.values[:,:,None],seq_fees,pct_fee.get(key, 0)),columns=s.columns,index=s.index)
 				path_s.append(s)
 				path_pw.append(pw)
 				path_w_abs_sum.append(pd.DataFrame(w.abs().sum(axis=1),columns=[key]))
