@@ -48,7 +48,7 @@ class ModelPipe:
 		self.y_transform = copy.deepcopy(y_transform) if y_transform is not None else IdleTransform()  # Store the class, not an instance
 		self.w_precision = w_precision
 		self.key = key or 'Dataset'
-		self.s,self.w,self.pw = None,None,None
+		self.s,self.w,self.pw,self.targets = None,None,None,None
 		self.train_data, self.test_data = None,None
 		self.train_pw = None
 
@@ -64,6 +64,12 @@ class ModelPipe:
 			return pd.DataFrame(self.s,columns=[STRATEGY_COLUMN],index=self.test_data.get_ts_as_timestamp())
 		else:
 			return None
+
+	def get_targets_df(self):
+		if self.targets is not None:
+			return pd.DataFrame(self.targets,columns=[TARGET_PREFIX_COLUMNS+c for c in self.test_data.y_cols],index=self.test_data.get_ts_as_timestamp())
+		else:
+			return None			
 	
 	def get_w_df(self):
 		if self.w is not None:
@@ -164,9 +170,10 @@ class ModelPipe:
 			idx=np.array([[0,n]],dtype=int)		
 		n_seq=idx.shape[0]
 
-		self.s = np.zeros(n, dtype=np.float64)
+		self.s = np.zeros(n, dtype=np.float64)		
 		self.w = np.zeros((n, p), dtype=np.float64)
 		self.pw = np.ones(n, dtype=np.float64)
+		self.targets = np.zeros((n,p), dtype=np.float64)
 
 		# for models that can benefict from incremental computations
 		# we can call a method set_start_evaluate to tell the model class
@@ -196,6 +203,7 @@ class ModelPipe:
 									)
 				w = round_weight(w = w, w_precision = self.w_precision)
 				self.w[i] = w
+				self.targets[i] = self.test_data.y[i]
 				self.s[i] = np.dot(self.test_data.y[i], w)
 				self.pw[i] = self.get_pw(self.test_data.y[:i])
 
@@ -338,11 +346,13 @@ class Path:
 		# all series in all model_pipes
 		self.s={}
 		self.w={}
+		self.targets = {}
 		self.pw={}
 		for key in self.keys:
 			self.s.update({key:[]})
 			self.w.update({key:[]})
 			self.pw.update({key:[]})
+			self.targets.update({key:[]})
 		# iterate model_pipes
 		for mps in self:
 			tmp={}
@@ -352,6 +362,8 @@ class Path:
 				self.s[k].append(mp.get_s_df())
 				# get weight dataframe
 				self.w[k].append(mp.get_w_df())
+				# get targets dataframe
+				self.targets[k].append(mp.get_targets_df())
 				# get portfolio weight
 				self.pw[k].append(mp.get_pw_df())
 		for k,v in self.s.items():
@@ -362,6 +374,10 @@ class Path:
 			tmp=pd.concat(self.w[k],axis=0)
 			tmp=tmp.sort_index()
 			self.w[k]=tmp
+		for k,v in self.targets.items():
+			tmp=pd.concat(self.targets[k],axis=0)
+			tmp=tmp.sort_index()
+			self.targets[k]=tmp			
 		for k,v in self.pw.items():
 			tmp=pd.concat(self.pw[k],axis=0)
 			tmp=tmp.sort_index()			
@@ -373,5 +389,5 @@ class Path:
 		if not self.joined: self.join()
 		self.results={}
 		for key in self.keys:			
-			self.results.update({key:pd.concat([self.s.get(key),self.w.get(key),self.pw.get(key)],axis=1)})
+			self.results.update({key:pd.concat([self.s.get(key),self.w.get(key),self.pw.get(key),self.targets.get(key)],axis=1)})
 		return self.results		

@@ -44,6 +44,7 @@ def valid_strategy(s,n_boot,sr_mult,pct_fee=0):
 	sharpe ratio via bootstrap from the worst path
 	s: numpy (n,k) array with strategy returns
 	'''
+	if isinstance(pct_fee, dict): pct_fee = list(pct_fee.values())[0]
 	paths_sr=sr_mult*np.mean(s,axis=0)/np.std(s,axis=0)
 	idx_lowest_sr=np.argmin(paths_sr)
 	b_samples=bootstrap_sharpe(s[:,idx_lowest_sr],n_boot=n_boot)
@@ -70,6 +71,7 @@ def valid_strategy(s,n_boot,sr_mult,pct_fee=0):
 	plt.show() 
 
 def performance_summary(s,sr_mult,pct_fee=0):
+	if isinstance(pct_fee, dict): pct_fee = list(pct_fee.values())[0]
 	print()
 	txt='** PERFORMANCE SUMMARY **' if pct_fee == 0 else '** PERFORMANCE SUMMARY at FEE=%s **'%pct_fee
 	print(txt)
@@ -80,6 +82,7 @@ def performance_summary(s,sr_mult,pct_fee=0):
 	print()
 
 def equity_curve(s,ts,color='g',pct_fee=0, title:str = 'Equity curve'):
+	if isinstance(pct_fee, dict): pct_fee = list(pct_fee.values())[0]
 	title=title if pct_fee == 0 else title+' FEE=%s'%pct_fee
 	s_df=pd.DataFrame(np.cumsum(s,axis=0),index=ts)
 	s_df.plot(color=color,title=title,legend=False)	
@@ -87,6 +90,7 @@ def equity_curve(s,ts,color='g',pct_fee=0, title:str = 'Equity curve'):
 	plt.show()
 
 def returns_distribution(s,pct_fee=0,bins=50):
+	if isinstance(pct_fee, dict): pct_fee = list(pct_fee.values())[0]
 	title='Strategy returns distribution' if pct_fee == 0 else 'Strategy returns distribution FEE=%s'%pct_fee
 	plt.title(title)
 	plt.hist(s.ravel(),bins=bins,density=True)

@@ -50,11 +50,16 @@ if __name__=='__main__':
 					k_folds=4, 
 					seq_path=False, 
 					start_fold=0, 
-					n_paths=4, 
+					n_paths=1, 
 					burn_fraction=0.1, 
 					min_burn_points=3, 
 					share_model=True, 
 					view_models=False
 					)
+	# print(paths)
+	for k,v in paths[0].items():
+		print(k)
+		print(v)
+
 
 	portfolio_post_process(paths, pct_fee = {'dataset 1':0, 'dataset 2':0.5,'dataset 3':0})
