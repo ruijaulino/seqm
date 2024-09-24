@@ -135,7 +135,7 @@ def filter_paths(paths:List[Dict[str,pd.DataFrame]],start_date:str = '',end_date
 	return f_paths
 
 
-def post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,key=None,start_date='',end_date='',*args,**kwargs):
+def post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,key=None,start_date='',end_date='', output_paths:bool = True,*args,**kwargs):
 	'''
 	paths: list of dict like [{'dataset 1':df,'dataset 2':df},{'dataset 1':df,'dataset 2':df},...]
 		each element of the paths list is the result for a given path
@@ -176,6 +176,7 @@ def post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr
 	w=np.stack(w,axis=2)
 	s=calculate_fees(s,w,seq_fees,pct_fee.get(key, 0))
 
+
 	# post processing
 	
 	equity_curve(s,ts,color='g',pct_fee=pct_fee)	
@@ -188,6 +189,7 @@ def post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr
 
 	performance_summary(s,sr_mult,pct_fee=pct_fee)
 	
+	if output_paths: return pd.DataFrame(s, index = ts, columns = [f'path_{i+1}' for i in range(s.shape[1])])
 
 def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,view_weights=True,use_pw=True,multiplier=1,start_date='',end_date='', n_boot_datasets:int = None, output_paths:bool = True, *args, **kwargs):
  
