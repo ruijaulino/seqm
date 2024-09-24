@@ -26,7 +26,6 @@ except ImportError:
 	from post_process import post_process,portfolio_post_process
 
 
-
 if __name__=='__main__':
 	data1=linear(n=1000,a=0,b=0.1,start_date='2000-01-01')
 	data2=linear(n=700,a=0,b=0.1,start_date='2000-06-01')
@@ -50,16 +49,12 @@ if __name__=='__main__':
 					k_folds=4, 
 					seq_path=False, 
 					start_fold=0, 
-					n_paths=1, 
+					n_paths=4, 
 					burn_fraction=0.1, 
 					min_burn_points=3, 
 					share_model=True, 
 					view_models=False
 					)
-	# print(paths)
-	for k,v in paths[0].items():
-		print(k)
-		print(v)
 
-
-	portfolio_post_process(paths, pct_fee = {'dataset 1':0, 'dataset 2':0.5,'dataset 3':0})
+	s = portfolio_post_process(paths, pct_fee = {'dataset 1':0, 'dataset 2':0.5,'dataset 3':0})
+	print(s)

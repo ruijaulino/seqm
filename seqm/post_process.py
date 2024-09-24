@@ -189,7 +189,7 @@ def post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr
 	performance_summary(s,sr_mult,pct_fee=pct_fee)
 	
 
-def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,view_weights=True,use_pw=True,multiplier=1,start_date='',end_date='', n_boot_datasets:int = None, *args, **kwargs):
+def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,view_weights=True,use_pw=True,multiplier=1,start_date='',end_date='', n_boot_datasets:int = None, output_paths:bool = True, *args, **kwargs):
  
 	paths = filter_paths(paths,start_date,end_date)
 
@@ -266,8 +266,15 @@ def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fee
 	lev=pd.concat(paths_leverage,axis=1)
 	n_datasets=pd.concat(paths_n_datasets,axis=1)
 
+	
+
+	out = s.copy(deep = True)
+	out.columns = [f'path_{i+1}' for i in range(len(out.columns))]
+
 	ts=s.index
 	s=s.values
+
+
 
 	equity_curve(s,ts,color='g',pct_fee=pct_fee)
 
@@ -288,6 +295,8 @@ def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fee
 	valid_strategy(s,n_boot,sr_mult,pct_fee=pct_fee)
 
 	performance_summary(s,sr_mult,pct_fee=pct_fee)
+
+	if output_paths: return out
 
 if __name__=='__main__':
 	paths=load_file('paths_dev.pkl')
