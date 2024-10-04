@@ -203,10 +203,11 @@ def nig_vi_track(
 
 
 class LR:
-	def __init__(self, kelly_std:float = 2, max_w:float = 1, bias_reduction:float = 0):
+	def __init__(self, kelly_std:float = 2, max_w:float = 1, bias_reduction:float = 0, m2:bool = True):
 		self.kelly_std = kelly_std
 		self.max_w = max_w
 		self.bias_reduction = bias_reduction
+		self.m2 = m2
 		assert 0 <= self.bias_reduction <= 1, "bias reduction must be between 0 and 1"
 		# parameters
 		self.a, self.b, self.m, self.p, self.q = None, None, None, None, None
@@ -248,7 +249,11 @@ class LR:
 	def get_weight(self, xq, **kwargs):
 		if isinstance(xq, np.ndarray):
 			xq = xq[0]
-		w = ( self.a * (1 - self.bias_reduction) + self.b * (xq - self.bias_reduction*self.m)) / self.p
+
+		if self.m2:
+			w = (self.a+self.b*xq)/(self.p+np.power(self.a+self.b*xq,2)) - self.bias_reduction*(self.a+self.b*self.m)/(self.p+self.b*self.b*self.q+np.power(self.a+self.b*xq,2))
+		else:
+			w = ( self.a * (1 - self.bias_reduction) + self.b * (xq - self.bias_reduction*self.m)) / self.p
 		#if self.unbiased:
 		#	w = self.b * (xq-self.m) / self.p
 		#else:
