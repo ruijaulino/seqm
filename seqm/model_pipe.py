@@ -230,7 +230,8 @@ class ModelPipes:
 		if not isinstance(item, ModelPipe):
 			raise TypeError("Item must be an instance of ModelPipe")
 		self.models[key] = copy.deepcopy(item)
-
+		self.models[key].key = key
+		
 	def __getitem__(self, key):
 		return self.models[key]
 
@@ -238,6 +239,7 @@ class ModelPipes:
 		if not isinstance(item, ModelPipe):
 			raise TypeError("Item must be an instance of ModelPipe")
 		self.models[key] = copy.deepcopy(item)
+		self.models[key].key = key
 
 	def __len__(self):
 		return len(self.models)
