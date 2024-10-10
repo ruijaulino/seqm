@@ -171,6 +171,10 @@ class Dataset:
 										)
 				pw = model_pipes[key].get_pw(data.y[:-1])		
 				out.update({key:{'w':w,'pw':pw}})		
+		# compute pw sum
+		pw_sum = 0
+		for k,v in model_pipes.items(): pw_sum+=v.train_pw
+		out.update({'total_pw':pw_sum})
 		return out
 
 	def cvbt(

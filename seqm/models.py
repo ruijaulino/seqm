@@ -7,7 +7,7 @@ import tqdm
 from numba import jit
 from abc import ABC, abstractmethod
 from typing import List, Union, Dict
-
+import sys
 # TEMPLATE
 
 
@@ -794,9 +794,16 @@ class Gaussian(object):
 				self.cov=np.array([[self.cov]])				
 			# regularize
 			self.cov=self.max_k*np.diag(np.diag(self.cov))+(1-self.max_k)*self.cov	
-			self.cov_inv=np.linalg.inv(self.cov)
-			self.w=np.dot(self.cov_inv,self.mean)		
-			self.w_norm=np.sum(np.abs(self.w))		
+			if np.linalg.cond(self.cov) < 1/sys.float_info.epsilon:
+				self.cov_inv=np.linalg.inv(self.cov)
+				self.w=np.dot(self.cov_inv,self.mean)		
+				self.w_norm=np.sum(np.abs(self.w))		
+			else:
+				print('Warning: singular cov...')
+				self.cov_inv = np.diag(np.ones(self.cov.shape[0]))
+				self.w = np.zeros(self.cov.shape[0])
+				self.w_norm = 1
+				#handle it
 		else:
 				
 			n=y.shape[0]
@@ -915,13 +922,14 @@ class StateGaussian(object):
 
 
 class ConditionalGaussian(object):
-	def __init__(self,n_gibbs=None,f_burn=0.1,min_k=0.25,max_k=0.25,kelly_std=2,max_w=1):
+	def __init__(self,n_gibbs=None,f_burn=0.1,min_k=0.25,max_k=0.25,kelly_std=2,max_w=1,bias_reduction=0):
 		self.n_gibbs=n_gibbs
 		self.no_gibbs=False
 		if self.n_gibbs is None:
 			self.no_gibbs=True
 		self.f_burn=f_burn
 		self.max_k=max_k
+		self.bias_reduction = bias_reduction
 		self.kelly_std=kelly_std
 		self.max_w=max_w
 		self.min_k=min_k
@@ -989,7 +997,8 @@ class ConditionalGaussian(object):
 	
 	def get_weight(self,xq,normalize=True,**kwargs):
 		if normalize:
-			w=np.dot(self.pred_cov_inv,self.predict(xq))/self.w_norm
+			w = np.dot(self.pred_cov_inv,self.predict(xq)) - self.bias_reduction*np.dot(self.pred_cov_inv,self.my)			
+			w /= self.w_norm
 			d=np.sum(np.abs(w))
 			if d>self.max_w:
 				w/=d
@@ -1755,7 +1764,7 @@ class StateConditionalGaussianMixture(object):
 
 # Gaussian HMM
 class GaussianHMM(object):
-	def __init__(self,n_states=2,n_gibbs=1000,A_zeros=[],A_groups=[],f_burn=0.1,max_k=0.25,pred_l=None,allowed_sides='all',**kwargs):
+	def __init__(self,n_states=2,n_gibbs=1000,A_zeros=[],A_groups=[],f_burn=0.1,max_k=0.25,pred_l=None,allowed_sides='all', bias_reduction=0,**kwargs):
 		'''
 		n_states: integer with the number of states
 		n_gibbs: integer with the number of gibbs iterations
@@ -1776,6 +1785,7 @@ class GaussianHMM(object):
 		self.A_groups=A_groups
 		self.pred_l=pred_l
 		self.allowed_sides=allowed_sides
+		self.bias_reduction = bias_reduction
 		if len(self.A_groups)==0:
 			self.A_groups=[[e] for e in range(self.n_states)]   
 		self.eff_n_states=len(self.A_groups)
@@ -1909,6 +1919,11 @@ class GaussianHMM(object):
 			cov+=(next_state_prob[s]*self.states_mean[s]*self.states_mean[s][:,None])
 		cov-=(mu*mu[:,None])
 		w=np.dot(np.linalg.inv(cov),mu)
+
+		# compute equilibrium bias
+		w -= self.bias_reduction*self.equilibrium_w
+
+
 		if self.allowed_sides=='long':
 			w[np.where(w<0)[0]]=0
 		if self.allowed_sides=='short':
@@ -2145,6 +2160,31 @@ class GaussianHMM(object):
 			self.states_cov_inv[i]=np.linalg.inv(self.states_cov[i])
 			self.states_cov_det[i]=np.linalg.det(self.states_cov[i])
 			self.w_norm=max(self.w_norm,np.sum(np.abs(np.dot(self.states_cov_inv[i],self.states_mean[i])))  )
+
+		# compute equilibrium distribution
+		n_iter_eq = 500
+		self.equilibrium_state = np.ones(self.A.shape[0], dtype = np.float64)
+		self.equilibrium_state /= np.sum(self.equilibrium_state)
+		for i in range(n_iter_eq):
+			self.equilibrium_state = np.dot(self.A.T, self.equilibrium_state)
+
+
+		#print('Equilibrium distribution: ', self.equilibrium_state)
+		# group next state prob
+		tmp=np.zeros(self.eff_n_states)
+		for i,e in enumerate(self.A_groups):
+			tmp[i]=np.sum(self.equilibrium_state[e])
+		next_state_prob=tmp		
+		# compute expected value		
+		mu=np.sum(self.states_mean*next_state_prob[:,None],axis=0)
+		# compute second central moment of the mixture distribution
+		cov=np.zeros((self.p,self.p))
+		for s in range(self.eff_n_states):
+			cov+=(next_state_prob[s]*self.states_cov[s])
+			cov+=(next_state_prob[s]*self.states_mean[s]*self.states_mean[s][:,None])
+		cov-=(mu*mu[:,None])
+		self.equilibrium_w=np.dot(np.linalg.inv(cov),mu)
+		# print('Equilibrium Weight: ', self.equilibrium_w)
 
 
 class ConditionalGaussianHMM(object):
