@@ -997,6 +997,8 @@ class ConditionalGaussian(object):
 	
 	def get_weight(self,xq,normalize=True,**kwargs):
 		if normalize:
+			if not hasattr(self, 'bias_reduction'):
+				self.bias_reduction = 0
 			w = np.dot(self.pred_cov_inv,self.predict(xq)) - self.bias_reduction*np.dot(self.pred_cov_inv,self.my)			
 			w /= self.w_norm
 			d=np.sum(np.abs(w))

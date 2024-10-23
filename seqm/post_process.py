@@ -38,7 +38,7 @@ def bootstrap_sharpe(s,n_boot=1000):
 	return boot_samples
 
 
-def valid_strategy(s,n_boot,sr_mult,pct_fee=0):
+def valid_strategy(s,n_boot,sr_mult,pct_fee=0, view = True):
 	'''
 	check if the paths represent a strategy with a positive
 	sharpe ratio via bootstrap from the worst path
@@ -52,23 +52,25 @@ def valid_strategy(s,n_boot,sr_mult,pct_fee=0):
 	valid=False
 	if np.sum(b_samples<0)==0:
 		valid=True
-	print()
 	if valid:
 		txt='** ACCEPT STRATEGY **' if pct_fee == 0 else '** ACCEPT STRATEGY at FEE=%s **'%pct_fee
-		print(txt)		
+		if view: print(txt)		
 	else:
 		txt='** REJECT STRATEGY **' if pct_fee == 0 else '** REJECT STRATEGY at FEE=%s **'%pct_fee
-		print(txt)		
+		if view: print(txt)		
 	if s.shape[1]!=1:
 		txt='Distribution of paths SHARPE' if pct_fee == 0 else 'Distribution of paths SHARPE at FEE=%s'%pct_fee
-		plt.title(txt)
-		plt.hist(paths_sr,density=True)
+		if view:
+			plt.title(txt)
+			plt.hist(paths_sr,density=True)
+			plt.grid(True)
+			plt.show()
+	if view:
+		plt.title('(Worst path) SR bootstrap distribution')
+		plt.hist(b_samples,density=True)
 		plt.grid(True)
-		plt.show()
-	plt.title('(Worst path) SR bootstrap distribution')
-	plt.hist(b_samples,density=True)
-	plt.grid(True)
-	plt.show() 
+		plt.show() 
+	return valid
 
 def performance_summary(s,sr_mult,pct_fee=0):
 	if isinstance(pct_fee, dict): pct_fee = list(pct_fee.values())[0]
@@ -133,6 +135,44 @@ def filter_paths(paths:List[Dict[str,pd.DataFrame]],start_date:str = '',end_date
 			tmp.update({k:f_df})
 		f_paths.append(tmp)
 	return f_paths
+
+
+def check_valid(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,key=None,start_date='',end_date='', output_paths:bool = True,*args,**kwargs):
+
+	paths = filter_paths(paths,start_date,end_date)
+
+	if len(paths) == 0:
+		print('No paths to process!')
+		return
+	keys = [k for k in paths[0]]
+
+	# transform into dict
+	if not isinstance(pct_fee, dict):
+		tmp = {}
+		for k in keys: tmp.update({k:pct_fee})
+		pct_fee = tmp
+
+	# by default use the results for the first dataframe used as input
+	# this will work by default because, in general, there is only one
+	key = key if key is not None else keys[0]
+	# get and joint results for key
+	s=[]
+	w=[]	
+
+	for path in paths:
+		df=path.get(key)
+		s.append(df[[STRATEGY_COLUMN]].values)
+		w.append(df.iloc[:, df.columns.str.startswith(WEIGHT_PREFIX_COLUMNS)].values)
+	if len(s)==0:
+		return False
+	ts=paths[0].get(key).index
+
+	# stack arrays
+	s=np.hstack(s)
+	w=np.stack(w,axis=2)
+	s=calculate_fees(s,w,seq_fees,pct_fee.get(key, 0))
+
+	return valid_strategy(s,n_boot,sr_mult,pct_fee=pct_fee, view = False)
 
 
 def post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fees=False,sr_mult=1,n_boot=1000,key=None,start_date='',end_date='', output_paths:bool = True,*args,**kwargs):
@@ -208,6 +248,7 @@ def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fee
 	paths_s=[]
 	paths_pw=[]
 	paths_leverage=[]
+	paths_net_leverage = []
 	paths_n_datasets=[]
 
 	paths_s_datasets_boot = []
@@ -223,6 +264,7 @@ def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fee
 			path_s=[]
 			path_pw=[]
 			path_w_abs_sum=[] # to build leverage
+			path_w_sum = []
 			for key in keys_sample:
 				df=path.get(key)
 				s=df[[STRATEGY_COLUMN]]
@@ -234,17 +276,21 @@ def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fee
 				path_s.append(s)
 				path_pw.append(pw)
 				path_w_abs_sum.append(pd.DataFrame(w.abs().sum(axis=1),columns=[key]))
+				path_w_sum.append(pd.DataFrame(w.abs().sum(axis=1),columns=[key]))
 
 			path_s=pd.concat(path_s,axis=1)
 			path_pw=pd.concat(path_pw,axis=1)
 			path_w_abs_sum=pd.concat(path_w_abs_sum,axis=1)
+			path_w_sum=pd.concat(path_w_sum,axis=1)
 			path_s.columns=keys_sample
 			path_pw.columns=keys_sample
 			path_w_abs_sum.columns=keys_sample
+			path_w_sum.columns = keys_sample
 			# fill na with zero
 			path_s=path_s.fillna(0)
 			path_pw=path_pw.fillna(0)
 			path_w_abs_sum=path_w_abs_sum.fillna(0)
+			path_w_sum = path_w_sum.fillna(0)
 
 			path_pw/=np.sum(np.abs(path_pw),axis=1).values[:,None]
 			path_pw*=multiplier
@@ -257,6 +303,7 @@ def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fee
 			if k == 0:
 				paths_s.append(path_s)
 				paths_pw.append(path_pw)
+				paths_net_leverage.append(pd.DataFrame(np.sum(path_w_sum*path_pw,axis=1),columns=['s']))
 				paths_leverage.append(pd.DataFrame(np.sum(path_w_abs_sum*path_pw,axis=1),columns=['s']))
 				paths_n_datasets.append(pd.DataFrame(non_zero_counts,columns=['n']))
 				
@@ -266,6 +313,7 @@ def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fee
 
 	w=np.stack([e.values for e in paths_pw],axis=2)
 	lev=pd.concat(paths_leverage,axis=1)
+	net_lev = pd.concat(paths_net_leverage, axis = 1)
 	n_datasets=pd.concat(paths_n_datasets,axis=1)
 
 	
@@ -287,9 +335,17 @@ def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fee
 	returns_distribution(s,pct_fee=pct_fee,bins=50)
 	
 	if view_weights: visualize_weights(w,ts,keys)
-	lev.plot(legend=False,title='Paths leverage')
+	lev.plot(legend=False,title='Paths Leverage')
 	plt.grid(True)
 	plt.show()
+	
+	net_lev.plot(legend=False,title='Paths Net Leverage')
+	plt.grid(True)
+	plt.show()
+
+
+
+
 	n_datasets.plot(legend=False,title='Number of datasets')
 	plt.grid(True)
 	plt.show()	
