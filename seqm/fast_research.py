@@ -41,8 +41,7 @@ def intraday_linear_models_search(px:pd.DataFrame, pct_fee:float = 0):
     px['day'] = px.index.date
     px['time'] = px.index.time
     # pivot the DataFrame
-    day_px = px.pivot(index='day', columns='time', values='px')
-    day_px = day_px.dropna()
+    day_px = px.pivot(index='day', columns='time', values='px')    
     # give column names
     day_px.columns = [str(e.hour*100+e.minute) for e in day_px.columns]
     
@@ -50,7 +49,6 @@ def intraday_linear_models_search(px:pd.DataFrame, pct_fee:float = 0):
     prev_day_px = day_px.shift(1).copy(deep = True)
     prev_day_px.columns = ['prev_'+e for e in prev_day_px.columns]
     px_2_days = pd.concat((prev_day_px, day_px), axis = 1)
-    px_2_days = px_2_days.dropna()
     
     # iterate all combinations
     cols_day = list(day_px.columns)
@@ -61,7 +59,6 @@ def intraday_linear_models_search(px:pd.DataFrame, pct_fee:float = 0):
     col_feature = []
     col_start = []
     col_end = []
-    
     for i in tqdm.tqdm(range(1, len(cols))):
         for j in range(i+1, len(cols)):
             for k in range(i):
@@ -75,6 +72,7 @@ def intraday_linear_models_search(px:pd.DataFrame, pct_fee:float = 0):
                 df = pd.concat((px_2_days[cols[i]]/px_2_days[cols[k]]-1, px_2_days[cols[j]]/px_2_days[cols[i]]-1), axis = 1)
                 df.columns = ['f', 'x']
                 df = df.dropna()
+                df = df[df.abs().sum(axis = 1)!=0]
                 # just a simple filter
                 if len(df)>10:
                     try:
@@ -97,9 +95,8 @@ def intraday_linear_models_search(px:pd.DataFrame, pct_fee:float = 0):
     return results
 
 
-
 if __name__ == '__main__':
-    
+
     n = 10000
     # just generate random data
     px = np.cumsum(np.random.normal(0, 1, n))
@@ -107,10 +104,6 @@ if __name__ == '__main__':
     px += np.max(px)
 
     px = pd.DataFrame(px, columns = ['px'], index = pd.date_range(start = '2000-01-01', freq = '4H', periods = n))
-
-    #px.plot()
-    #plt.show()
-
 
     res = intraday_linear_models_search(px, pct_fee = 0)
     print(res)
