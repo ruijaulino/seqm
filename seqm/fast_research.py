@@ -31,7 +31,7 @@ def linear_model(x, y, calc_s:bool = False, use_qr:bool = True):
     return b, s, w
 
 
-def intraday_linear_models_search(px:pd.DataFrame, pct_fee:float = 0):
+def intraday_linear_models_search(px:pd.DataFrame, pct_fee:float = 0, prev_day_only:bool = False):
     '''
     px: pandas DataFrame with a single column with prices    
     '''
@@ -57,46 +57,69 @@ def intraday_linear_models_search(px:pd.DataFrame, pct_fee:float = 0):
     cols = list(px_2_days.columns)
 
     sharpe = []
-    col_feature = []
-    col_start = []
-    col_end = []
-
+    col_feature_start = []
+    col_feature_end = []
+    col_trd_start = []
+    col_trd_end = []
 
     for i in tqdm.tqdm(range(1, len(cols))):
         for j in range(i+1, min(i+int(len(cols)/2),len(cols))):
-            for k in range(i):
-                
-                # feature
-                f = px_2_days[cols[i]]/px_2_days[cols[k]]-1
-                # target
-                x = px_2_days[cols[j]]/px_2_days[cols[i]]-1
-                
-                # feature, target, df
-                df = pd.concat((px_2_days[cols[i]]/px_2_days[cols[k]]-1, px_2_days[cols[j]]/px_2_days[cols[i]]-1), axis = 1)
-                df.columns = ['f', 'x']
-                df = df.dropna()
-                df = df[df.abs().sum(axis = 1)!=0]
-                # just a simple filter
-                if len(df)>100:
-                    try:
-                        b, s, w = linear_model(df['f'].values, df['x'].values, calc_s = True)
-                        s -= pct_fee*np.abs(w)
-                        sharpe.append(np.mean(s)/np.std(s))
-                        col_feature.append(cols[k])
-                        col_start.append(cols[i])
-                        col_end.append(cols[j])
-                    except:
-                        pass
+            # run with previous day
+
+            x = px_2_days[cols[j]]/px_2_days[cols[i]]-1
+            df = pd.DataFrame()
+            df['x'] = x
+            df = df.dropna()
+            df = df[df.abs().sum(axis = 1)!=0]
+            df['f'] = df['x'].shift(1)
+            df = df.dropna()
+            # just a simple filter
+            if len(df)>100:
+                try:
+                    b, s, w = linear_model(df['f'].values, df['x'].values, calc_s = True)
+                    s -= pct_fee*np.abs(w)
+                    sharpe.append(np.mean(s)/np.std(s))
+                    col_feature_start.append('prev_day_' + cols[i])
+                    col_feature_end.append('prev_day_' + cols[j])
+                    col_trd_start.append(cols[i])
+                    col_trd_end.append(cols[j])
+                except:
+                    pass
+            if not prev_day_only:
+                # run for all features with past lags
+                for k in range(i):                    
+                    # feature
+                    f = px_2_days[cols[i]]/px_2_days[cols[k]]-1
+                    # target
+                    x = px_2_days[cols[j]]/px_2_days[cols[i]]-1
+                    # feature, target, df
+                    df = pd.concat((px_2_days[cols[i]]/px_2_days[cols[k]]-1, px_2_days[cols[j]]/px_2_days[cols[i]]-1), axis = 1)
+                    df.columns = ['f', 'x']
+                    df = df.dropna()
+                    df = df[df.abs().sum(axis = 1)!=0]
+                    df = df.dropna()
+                    # just a simple filter
+                    if len(df)>100:
+                        try:
+                            b, s, w = linear_model(df['f'].values, df['x'].values, calc_s = True)
+                            s -= pct_fee*np.abs(w)
+                            sharpe.append(np.mean(s)/np.std(s))
+                            col_feature_start.append(cols[k])
+                            col_feature_end.append(cols[i])
+                            col_trd_start.append(cols[i])
+                            col_trd_end.append(cols[j])
+                        except:
+                            pass
 
     results = pd.DataFrame()
     results['sharpe'] = sharpe
-    results['col_feature'] = col_feature
-    results['col_start'] = col_start
-    results['col_end'] = col_end
+    results['col_feature_start'] = col_feature_start
+    results['col_feature_end'] = col_feature_end
+    results['col_trd_start'] = col_trd_start
+    results['col_trd_end'] = col_trd_end
     results = results.dropna()
     results = results.sort_values('sharpe')
     return results
-
 
 if __name__ == '__main__':
 
@@ -110,6 +133,7 @@ if __name__ == '__main__':
 
     res = intraday_linear_models_search(px, pct_fee = 0)
     print(res)
+    res.to_csv('fast_research_results.csv')
 
 
 
