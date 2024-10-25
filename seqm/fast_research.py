@@ -30,6 +30,7 @@ def linear_model(x, y, calc_s:bool = False, use_qr:bool = True):
         w = None
     return b, s, w
 
+
 def intraday_linear_models_search(px:pd.DataFrame, pct_fee:float = 0):
     '''
     px: pandas DataFrame with a single column with prices    
@@ -59,8 +60,10 @@ def intraday_linear_models_search(px:pd.DataFrame, pct_fee:float = 0):
     col_feature = []
     col_start = []
     col_end = []
+
+
     for i in tqdm.tqdm(range(1, len(cols))):
-        for j in range(i+1, len(cols)):
+        for j in range(i+1, min(i+int(len(cols)/2),len(cols))):
             for k in range(i):
                 
                 # feature
@@ -74,7 +77,7 @@ def intraday_linear_models_search(px:pd.DataFrame, pct_fee:float = 0):
                 df = df.dropna()
                 df = df[df.abs().sum(axis = 1)!=0]
                 # just a simple filter
-                if len(df)>10:
+                if len(df)>100:
                     try:
                         b, s, w = linear_model(df['f'].values, df['x'].values, calc_s = True)
                         s -= pct_fee*np.abs(w)
