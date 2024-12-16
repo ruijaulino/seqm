@@ -31,7 +31,7 @@ def linear_model(x, y, calc_s:bool = False, use_qr:bool = True):
     return b, s, w
 
 
-def intraday_linear_models_search(px:pd.DataFrame, pct_fee:float = 0, prev_day_only:bool = False):
+def intraday_linear_models_search_old(px:pd.DataFrame, pct_fee:float = 0, prev_day_only:bool = False):
     '''
     px: pandas DataFrame with a single column with prices    
     '''
