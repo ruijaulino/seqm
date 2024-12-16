@@ -68,7 +68,7 @@ def generate_tasks(subsets_start, subsets_end, min_idx_target=0):
     tasks = List()  # Initialize numba-typed list
     for i in range(num_subsets):
         for j in range(num_subsets):
-            if subsets_start[j] > subsets_end[i] and subsets_start[j] >= min_idx_target:
+            if subsets_start[j] >= subsets_end[i] and subsets_start[j] >= min_idx_target:
                 tasks.append((i, j))
     return tasks
 
@@ -170,7 +170,7 @@ def build_data(data:pd.DataFrame, add_prev_day:bool = True):
     return data
 
 
-def intraday_linear_models_search(data:pd.DataFrame, max_window:int = None, add_prev_day:bool = True, quantile:float = 0.95, n_jobs:int = 10, filename = None):
+def model_search(data:pd.DataFrame, max_window:int = None, add_prev_day:bool = True, quantile:float = 0.95, n_jobs:int = 10, filename = None):
     start_time = time.time()
 
     data = build_data(data, add_prev_day = add_prev_day)
@@ -234,7 +234,7 @@ if __name__ == '__main__':
     n = 100
     data = pd.DataFrame(10 + np.cumsum(np.random.normal(0,0.0001,n)), index = pd.date_range('2000-01-01', periods = n, freq = '15T'))
     print(data)
-    out = intraday_linear_models_search(data, max_window=5, quantile=0.99, n_jobs=1, filename=None)
+    out = model_search(data, max_window=5, quantile=0.99, n_jobs=1, filename=None)
     print(out)
 
 
