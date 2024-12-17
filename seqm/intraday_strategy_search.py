@@ -87,13 +87,16 @@ def compute_strategy(px_matrix, feature_start, feature_end, target_start, target
     x = x[idx]
     y = y[idx]
     # keep most points
-    if x.size/n > valid_fraction:
-        if x.size > min_points:        
-            _, s, _ = linear_model(x, y, calc_s = True, use_qr = True)
-            sr = np.mean(s)/np.std(s)
-            if sr>0:
-                return i, j, sr
-            else:
+    if x.size/n >= valid_fraction:
+        if x.size >= min_points:        
+            try:
+                _, s, _ = linear_model(x, y, calc_s = True, use_qr = True)
+                sr = np.mean(s)/np.std(s)
+                if sr>0:
+                    return i, j, sr
+                else:
+                    return None
+            except:
                 return None
         else:
             return None
@@ -101,13 +104,24 @@ def compute_strategy(px_matrix, feature_start, feature_end, target_start, target
         return None
 
 
-def model_search_base(px_matrix, max_window:int = None, n_jobs:int = 1, min_idx_target:int = 0, valid_fraction:float = 0.5):
-    p = px_matrix.shape[1]
+def model_search_base(px_matrix, max_window:int = None, n_jobs:int = 1, min_idx_target:int = 0, valid_quantile:float = 0.2):
+    
+    n, p = px_matrix.shape
 
     print('Generate subsets..')
     if max_window is None:
         max_window = p  # or some default integer value        
     subsets_start, subsets_end = generate_adjacent_subsets(p, max_size=max_window)
+
+
+    # compute valid fraction
+    f = []
+    for i in range(p):
+        x = px_matrix[:,i]
+        idx = ~np.isnan(x)
+        x = x[idx]    
+        f.append(x.size/n)
+    valid_fraction = np.quantile(f, valid_quantile)
 
     # convert into numpy array
     subsets_start = np.array(subsets_start, dtype = int)
@@ -117,6 +131,9 @@ def model_search_base(px_matrix, max_window:int = None, n_jobs:int = 1, min_idx_
                 subsets_start, 
                 subsets_end, 
                 min_idx_target)
+
+    # compute fraction to use
+
 
     # Parallel computation with progress bar
     results = Parallel(n_jobs = n_jobs)(
@@ -172,7 +189,7 @@ def build_data(data:pd.DataFrame, add_prev_day:bool = True):
     return data
 
 
-def intraday_linear_models_search(data:pd.DataFrame, max_window:int = None, add_prev_day:bool = True, quantile:float = 0.95, n_jobs:int = 10, valid_fraction:float = 0.5, filename = None):
+def intraday_linear_models_search(data:pd.DataFrame, max_window:int = None, add_prev_day:bool = True, quantile:float = 0.95, n_jobs:int = 10, valid_quantile:float = 0.2, filename = None):
     start_time = time.time()
 
     data = build_data(data, add_prev_day = add_prev_day)
@@ -189,7 +206,7 @@ def intraday_linear_models_search(data:pd.DataFrame, max_window:int = None, add_
                                                                         max_window = max_window, 
                                                                         n_jobs = n_jobs, 
                                                                         min_idx_target = min_idx_target,
-                                                                        valid_fraction = valid_fraction
+                                                                        valid_quantile = valid_quantile
                                                                         )
 
     # Compute threshold
