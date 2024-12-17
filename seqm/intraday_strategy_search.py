@@ -73,7 +73,7 @@ def generate_tasks(subsets_start, subsets_end, min_idx_target=0):
     return tasks
 
 # Function to compute correlation for a pair of subsets
-def compute_strategy(px_matrix, feature_start, feature_end, target_start, target_end, i, j):
+def compute_strategy(px_matrix, feature_start, feature_end, target_start, target_end, i, j, valid_fraction = 0.5):
     '''
     px_matrix: numpy (n,p) array with prices
         the idea is that they are prices over day periods and
@@ -87,7 +87,7 @@ def compute_strategy(px_matrix, feature_start, feature_end, target_start, target
     x = x[idx]
     y = y[idx]
     # keep most points
-    if x.size/n > 0.75:
+    if x.size/n > valid_fraction:
         if x.size > min_points:        
             _, s, _ = linear_model(x, y, calc_s = True, use_qr = True)
             sr = np.mean(s)/np.std(s)
@@ -101,7 +101,7 @@ def compute_strategy(px_matrix, feature_start, feature_end, target_start, target
         return None
 
 
-def model_search_base(px_matrix, max_window:int = None, n_jobs:int = 1, min_idx_target:int = 0):
+def model_search_base(px_matrix, max_window:int = None, n_jobs:int = 1, min_idx_target:int = 0, valid_fraction:float = 0.5):
     p = px_matrix.shape[1]
 
     print('Generate subsets..')
@@ -127,7 +127,8 @@ def model_search_base(px_matrix, max_window:int = None, n_jobs:int = 1, min_idx_
                     subsets_start[t[1]],
                     subsets_end[t[1]],
                     t[0],
-                    t[1]
+                    t[1],
+                    valid_fraction
                     ) for t in tqdm(tasks, desc="Computing Sharpes")
     )
         
@@ -171,7 +172,7 @@ def build_data(data:pd.DataFrame, add_prev_day:bool = True):
     return data
 
 
-def intraday_linear_models_search(data:pd.DataFrame, max_window:int = None, add_prev_day:bool = True, quantile:float = 0.95, n_jobs:int = 10, filename = None):
+def intraday_linear_models_search(data:pd.DataFrame, max_window:int = None, add_prev_day:bool = True, quantile:float = 0.95, n_jobs:int = 10, valid_fraction:float = 0.5, filename = None):
     start_time = time.time()
 
     data = build_data(data, add_prev_day = add_prev_day)
@@ -187,7 +188,8 @@ def intraday_linear_models_search(data:pd.DataFrame, max_window:int = None, add_
                                                                         px_matrix, 
                                                                         max_window = max_window, 
                                                                         n_jobs = n_jobs, 
-                                                                        min_idx_target = min_idx_target
+                                                                        min_idx_target = min_idx_target,
+                                                                        valid_fraction = valid_fraction
                                                                         )
 
     # Compute threshold
