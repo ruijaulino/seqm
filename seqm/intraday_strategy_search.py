@@ -161,6 +161,7 @@ def build_data(data:pd.DataFrame, add_prev_day:bool = True):
     data['Date'] = data.index.date
     data['Time'] = data.index.time
     # Pivot the dataframe to create a matrix where each row is a day, and columns are time intervals
+    data.drop_duplicates(['Date','Time'], inplace = True)
     data = data.pivot(index='Date', columns='Time', values='PX')
     data.columns = [str(e) for e in data.columns] # make columns string
     if add_prev_day:
@@ -170,7 +171,7 @@ def build_data(data:pd.DataFrame, add_prev_day:bool = True):
     return data
 
 
-def model_search(data:pd.DataFrame, max_window:int = None, add_prev_day:bool = True, quantile:float = 0.95, n_jobs:int = 10, filename = None):
+def intraday_linear_models_search(data:pd.DataFrame, max_window:int = None, add_prev_day:bool = True, quantile:float = 0.95, n_jobs:int = 10, filename = None):
     start_time = time.time()
 
     data = build_data(data, add_prev_day = add_prev_day)
@@ -234,7 +235,7 @@ if __name__ == '__main__':
     n = 100
     data = pd.DataFrame(10 + np.cumsum(np.random.normal(0,0.0001,n)), index = pd.date_range('2000-01-01', periods = n, freq = '15T'))
     print(data)
-    out = model_search(data, max_window=5, quantile=0.99, n_jobs=1, filename=None)
+    out = intraday_linear_models_search(data, max_window=5, quantile=0.99, n_jobs=1, filename=None)
     print(out)
 
 
