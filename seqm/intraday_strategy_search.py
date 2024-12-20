@@ -14,7 +14,7 @@ plt.style.use('dark_background')
     
 
 
-def linear_model(x, y, calc_s:bool = False, use_qr:bool = True):
+def linear_model_old(x, y, calc_s:bool = False, use_qr:bool = True):
     assert x.ndim == 1, "x must be a vector"
     assert y.ndim == 1, "y must be a vector"
     assert x.size == y.size, "x and y must have the same length"
@@ -41,7 +41,39 @@ def linear_model(x, y, calc_s:bool = False, use_qr:bool = True):
     return b, s, w
 
 
-
+@jit(nopython=True)
+def linear_model(x, y):
+    assert x.ndim == 1, "x must be a vector"
+    assert y.ndim == 1, "y must be a vector"
+    assert x.size == y.size, "x and y must have the same length"
+    
+    n = x.size
+    X = np.column_stack((np.ones(n), x))
+    
+    # Ensure that X, Q, and y are contiguous in memory
+    X = np.ascontiguousarray(X)
+    y = np.ascontiguousarray(y)
+    
+    # QR decomposition
+    Q, R = np.linalg.qr(X)
+    
+    # Ensure Q is contiguous
+    Q = np.ascontiguousarray(Q)
+    
+    # Solve for b
+    b = np.linalg.solve(R, Q.T @ y)
+    
+    # Compute leverage scores
+    h = np.sum(Q**2, axis=1)
+    
+    # Compute weights w
+    y_hat = X @ b
+    w = (y_hat - y * h) / (1 - h)
+    
+    # Compute scaled residuals s
+    s = y * w
+    
+    return b, s, w
 
 # Function to generate adjacent subsets (contiguous blocks of variables)
 @jit(nopython = True)
@@ -73,6 +105,7 @@ def generate_tasks(subsets_start, subsets_end, min_idx_target=0):
     return tasks
 
 # Function to compute correlation for a pair of subsets
+@jit(nopython=True)
 def compute_strategy(px_matrix, feature_start, feature_end, target_start, target_end, i, j, valid_fraction = 0.5):
     '''
     px_matrix: numpy (n,p) array with prices
@@ -83,6 +116,8 @@ def compute_strategy(px_matrix, feature_start, feature_end, target_start, target
     n, p = px_matrix.shape
     x = px_matrix[:,feature_end]/px_matrix[:,feature_start] - 1
     y = px_matrix[:,target_end]/px_matrix[:,target_start] - 1
+    x = np.ascontiguousarray(x)
+    y = np.ascontiguousarray(y)
     idx = ~np.isnan(x) & ~np.isnan(y)
     x = x[idx]
     y = y[idx]
@@ -90,7 +125,7 @@ def compute_strategy(px_matrix, feature_start, feature_end, target_start, target
     if x.size/n >= valid_fraction:
         if x.size >= min_points:        
             try:
-                _, s, _ = linear_model(x, y, calc_s = True, use_qr = True)
+                _, s, _ = linear_model(x, y)
                 sr = np.mean(s)/np.std(s)
                 if sr>0:
                     return i, j, sr
@@ -102,6 +137,7 @@ def compute_strategy(px_matrix, feature_start, feature_end, target_start, target
             return None
     else:
         return None
+
 
 
 def model_search_base(px_matrix, max_window:int = None, n_jobs:int = 1, min_idx_target:int = 0, valid_quantile:float = 0.2):
@@ -132,9 +168,10 @@ def model_search_base(px_matrix, max_window:int = None, n_jobs:int = 1, min_idx_
                 subsets_end, 
                 min_idx_target)
 
-    # compute fraction to use
+    # make a small computation
+    # linear_model(np.random.normal(0,1,10), np.random.normal(0,1,10))
 
-
+    px_matrix = np.ascontiguousarray(px_matrix)
     # Parallel computation with progress bar
     results = Parallel(n_jobs = n_jobs)(
         delayed(compute_strategy)(
@@ -213,21 +250,17 @@ def intraday_linear_models_search(data:pd.DataFrame, max_window:int = None, add_
     if sharpe.size:
         sr_th = np.quantile(sharpe, quantile)
         print(f"Sharpe Threshold: {sr_th:.4f}")
-        
-        if np.where(sharpe>sr_th)[0].size<10000:
-            sr_th = -1
-        
+        print('Saving all results..')        
         # Prepare results
         res = []
         for i in range(len(sharpe)):
-            if sharpe[i] >= sr_th:
-                res.append([
-                    cols[subsets_start[features[i]]],
-                    cols[subsets_end[features[i]]],
-                    cols[subsets_start[targets[i]]],
-                    cols[subsets_end[targets[i]]],
-                    sharpe[i]
-                ])
+            res.append([
+                cols[subsets_start[features[i]]],
+                cols[subsets_end[features[i]]],
+                cols[subsets_start[targets[i]]],
+                cols[subsets_end[targets[i]]],
+                sharpe[i]
+            ])
         res = pd.DataFrame(res, columns=['Feature Start', 'Feature End', 'Target Start', 'Target End', 'Sharpe'])
         res = res.sort_values('Sharpe')
         # Save results
@@ -249,8 +282,40 @@ def test_subsets():
     for i in range(len(subsets_start)):
         print(f"Subset {i}: from index {subsets_start[i]} to {subsets_end[i]}")
 
+def dev():
+    px_matrix = np.random.normal(0,1,(20,6))
+    n, p = px_matrix.shape
+
+    min_idx_target = 0
+    max_window = None
+    print('Generate subsets..')
+    if max_window is None:
+        max_window = p  # or some default integer value        
+    subsets_start, subsets_end = generate_adjacent_subsets(p, max_size=max_window)
+
+
+    # convert into numpy array
+    subsets_start = np.array(subsets_start, dtype = int)
+    subsets_end = np.array(subsets_end, dtype = int)
+    print('Generate tasks..')
+    tasks = generate_tasks(
+                subsets_start, 
+                subsets_end, 
+                min_idx_target)    
+    for task in tasks:
+        print(f"{subsets_start[task[0]]} - {subsets_end[task[0]]} ---> {subsets_start[task[1]]} - {subsets_end[task[1]]}")
+    print(tasks)
+
+
 if __name__ == '__main__':
+    dev()
+    print(Sdfsdf)
      # Example call
+    try:
+        compute_strategy(None, None, None, None, None, 0, 0, valid_fraction = 0.5)
+    except:
+        pass
+    linear_model(np.random.normal(0,1,10), np.random.normal(0,1,10))
     n = 100
     data = pd.DataFrame(10 + np.cumsum(np.random.normal(0,0.0001,n)), index = pd.date_range('2000-01-01', periods = n, freq = '15T'))
     print(data)
