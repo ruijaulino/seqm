@@ -1,6 +1,3 @@
-
-# TO DO: change name to ModelPipe??
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -8,15 +5,14 @@ from typing import List, Union, Dict
 import copy
 
 try:
-	from .transform import BaseTransform,IdleTransform
+	from .transform import BaseTransform, IdleTransform
 	from .constants import *
 except ImportError:
-	from transform import BaseTransform,IdleTransform
+	from transform import BaseTransform, IdleTransform
 	from constants import *
 
 # class with a model and a transformer
 # train, test, live of model
-
 
 def does_cls_have_method(cls_instance, method: str) -> bool:
 	instance_method = getattr(cls_instance, method, None)
@@ -28,28 +24,28 @@ def does_cls_have_method(cls_instance, method: str) -> bool:
 		else:
 			return False
 
-
 def round_weight(w:np.ndarray, w_precision:float = 0.0001) -> np.ndarray:
 	return np.sign(w) * np.round( np.abs(w) / w_precision ) * w_precision
 
-
-class ModelPipe:
+# container for computations
+# apply transformations, estimate and evaluate models
+class BaseModelPipe:
 	
 	def __init__(
 				self,
+				model = None, 
 				x_transform:BaseTransform = None, 
 				y_transform:BaseTransform = None,
-				model = None, 
 				w_precision = 0.0001,
 				key: str = 'no key defined'
 				):
-		self.model=copy.deepcopy(model)
+		self.model = copy.deepcopy(model)
 		self.x_transform = copy.deepcopy(x_transform) if x_transform is not None else IdleTransform()  # Store the class, not an instance
 		self.y_transform = copy.deepcopy(y_transform) if y_transform is not None else IdleTransform()  # Store the class, not an instance
 		self.w_precision = w_precision
 		self.key = key or 'Dataset'
-		self.s,self.w,self.pw,self.targets = None,None,None,None
-		self.train_data, self.test_data = None,None
+		self.s, self.w, self.pw, self.targets = None, None, None, None
+		self.train_data, self.test_data = None, None
 		self.train_pw = None
 
 	def view(self):
@@ -129,11 +125,11 @@ class ModelPipe:
 
 	# apply transform
 	# ------------
-	def transform_x(self, x, copy_array = True):
+	def transform_x(self, x:np.ndarray, copy_array:bool = True):
 		if copy_array: x = np.array(x)
 		return self.x_transform.transform(x)
 	
-	def transform_y(self, y, copy_array = True):
+	def transform_y(self, y:np.ndarray, copy_array:bool = True):
 		if copy_array: y = np.array(y)
 		return self.y_transform.transform(y)
 
@@ -210,15 +206,15 @@ class ModelPipe:
 		# when this is called the class should reset the variables used for incremental evaluation
 		if does_cls_have_method(self.model, 'set_end_evaluate'): self.model.set_end_evaluate()
 
-# dict of ModelWrappers
-class ModelPipes:
+# dict of BaseModelPipe to keep logic separated
+class ModelPipe:
 
 	def __init__(self, master_model = None):
 		# if a master model is defined it is trained with 
 		# all training data and set on all individual pipes
 		# as it's model
 		self.master_model = copy.deepcopy(master_model)
-		self.models = {}
+		self.base_model_pipes = {}
 
 	def view(self):
 		for k,v in self.items():
@@ -226,35 +222,38 @@ class ModelPipes:
 			print()
 			print()
 
-	def add(self, key, item: ModelPipe):
-		if not isinstance(item, ModelPipe):
-			raise TypeError("Item must be an instance of ModelPipe")
-		self.models[key] = copy.deepcopy(item)
-		self.models[key].key = key
+	def add(self, model = None, x_transform:BaseTransform = None, y_transform:BaseTransform = None, w_precision = 0.0001, key: str = 'no key defined'):
+		'''
+		Create a new instance of BaseModelPipe
+		'''
+		self.base_model_pipes[key] = BaseModelPipe(model = model, x_transform = x_transform, y_transform = y_transform, w_precision = w_precision, key = key)
 		
 	def __getitem__(self, key):
-		return self.models[key]
+		return self.base_model_pipes.get(key, None)
 
-	def __setitem__(self, key, item: ModelPipe):
-		if not isinstance(item, ModelPipe):
-			raise TypeError("Item must be an instance of ModelPipe")
-		self.models[key] = copy.deepcopy(item)
-		self.models[key].key = key
+	def __setitem__(self, key, item: BaseModelPipe):
+		'''
+		Should not be used..
+		'''
+		if not isinstance(item, BaseModelPipe):
+			raise TypeError("Item must be an instance of BaseModelPipe")
+		self.base_model_pipes[key] = copy.deepcopy(item)
+		self.base_model_pipes[key].key = key
 
 	def __len__(self):
-		return len(self.models)
+		return len(self.base_model_pipes)
 
 	def __iter__(self):
-		return iter(self.models)
+		return iter(self.base_model_pipes)
 
 	def keys(self):
-		return self.models.keys()
+		return self.base_model_pipes.keys()
 
 	def values(self):
-		return self.models.values()
+		return self.base_model_pipes.values()
 
 	def items(self):
-		return self.models.items()
+		return self.base_model_pipes.items()
 
 	def remove(self, key):
 		"""
@@ -266,13 +265,13 @@ class ModelPipes:
 		Raises:
 		- KeyError: If the key is not found in the models.
 		"""
-		if key in self.models:
-			del self.models[key]
+		if key in self.base_model_pipes:
+			del self.base_model_pipes[key]
 		else:
 			pass
 
 	# more methods
-	def has_keys(self,keys:Union[list,str]):
+	def has_keys(self, keys:Union[list,str]):
 		if isinstance(keys,str):
 			keys=[keys]
 		for key in keys:
@@ -280,16 +279,25 @@ class ModelPipes:
 				return False
 		return True
 
+	def set_data(self, key:str, train_data, test_data):
+		assert key in self.keys(), f"ModelPipe for key {key} not defined"
+		self.base_model_pipes[key].set_data(train_data, test_data)
+
+	def set_train_data(self, key:str, train_data):
+		assert key in self.keys(), f"ModelPipe for key {key} not defined"
+		self.base_model_pipes[key].set_train_data(train_data)
+
+	def set_test_data(self, key:str, test_data):
+		assert key in self.keys(), f"ModelPipe for key {key} not defined"
+		self.base_model_pipes[key].set_test_data(test_data)
+
 	def estimate(self):
 		
 		if self.master_model is not None:
 			# if the model is shared then we train a single model
 			# on all data joined
-			# it is assumed that the individual model pipes
-			# have suitable normalizations
-			# maybe this could be a method...
 			data = None
-			for k,e in self.items():
+			for k, e in self.items():
 				if data is None:
 					data = copy.deepcopy(e.train_data)
 				else:
@@ -297,41 +305,37 @@ class ModelPipes:
 			if data.empty: raise Exception('data is empty. should not happen')
 			self.master_model.estimate(**data.build_train_inputs())
 			# set individual copies			
-			for k,e in self.items(): e.set_model(self.master_model)
+			for k, e in self.items(): e.set_model(self.master_model)
 		else:
-			for k,m in self.items():m.estimate()
+			for k, m in self.items(): m.estimate()
 		return self
 
 	def evaluate(self):
-		for k,e in self.items(): e.evaluate()
+		for k, e in self.items(): e.evaluate()
 		return self
 
 
-# Path is a collection/list of ModelPipes
+# Path is a collection/list of ModelPipe to join backtest results
 class Path:
 	def __init__(self):
-		self.model_pipes=[]
-		self.results={}
-		self.s,self.w,self.pw={},{},{}
-		self.joined=False
+		self.model_pipes = []
+		self.results = {}
+		self.s, self.w, self.pw = {}, {}, {}
+		self.joined = False
 
 	@property
 	def keys(self):
 		out = []
 		for e in self.model_pipes: 
-			out+=list(e.keys())
-		out=list(set(out))
+			out += list(e.keys())
+		out = list(set(out))
 		return out
-		#if len(self.model_pipes)!=0:
-		#	return list(self.model_pipes[0].keys())
-		#else:
-		# 	return []
 
-	def add(self,item:ModelPipes):
-		if isinstance(item, ModelPipes):
+	def add(self, item:ModelPipe):
+		if isinstance(item, ModelPipe):
 			self.model_pipes.append(item)
 		else:
-			raise TypeError("Item must be an instance of ModelPipes")
+			raise TypeError("Item must be an instance of ModelPipe")
 
 	def __getitem__(self, index):
 		return self.model_pipes[index]
@@ -346,50 +350,56 @@ class Path:
 	def join(self):
 		# join strategy performance for
 		# all series in all model_pipes
-		self.s={}
-		self.w={}
+		self.s = {}
+		self.w = {}
 		self.targets = {}
-		self.pw={}
+		self.pw = {}
 		for key in self.keys:
 			self.s.update({key:[]})
 			self.w.update({key:[]})
 			self.pw.update({key:[]})
 			self.targets.update({key:[]})
 		# iterate model_pipes
-		for mps in self:
-			tmp={}
+		for model_pipes in self:
+			tmp = {}
 			# iterate series in element
-			for k,mp in mps.items():
+			for k, base_model_pipes in model_pipes.items():
 				# get performance dataframe
-				self.s[k].append(mp.get_s_df())
+				self.s[k].append(base_model_pipes.get_s_df())
 				# get weight dataframe
-				self.w[k].append(mp.get_w_df())
+				self.w[k].append(base_model_pipes.get_w_df())
 				# get targets dataframe
-				self.targets[k].append(mp.get_targets_df())
+				self.targets[k].append(base_model_pipes.get_targets_df())
 				# get portfolio weight
-				self.pw[k].append(mp.get_pw_df())
-		for k,v in self.s.items():
-			tmp=pd.concat(self.s[k],axis=0)
-			tmp=tmp.sort_index()
-			self.s[k]=tmp
-		for k,v in self.w.items():
-			tmp=pd.concat(self.w[k],axis=0)
-			tmp=tmp.sort_index()
-			self.w[k]=tmp
-		for k,v in self.targets.items():
-			tmp=pd.concat(self.targets[k],axis=0)
-			tmp=tmp.sort_index()
-			self.targets[k]=tmp			
-		for k,v in self.pw.items():
-			tmp=pd.concat(self.pw[k],axis=0)
-			tmp=tmp.sort_index()			
-			self.pw[k]=tmp		
-		self.joined=True
+				self.pw[k].append(base_model_pipes.get_pw_df())
+		for k, v in self.s.items():
+			tmp = pd.concat(self.s[k], axis = 0)
+			tmp = tmp.sort_index()
+			self.s[k] = tmp
+		for k, v in self.w.items():
+			tmp = pd.concat(self.w[k], axis = 0)
+			tmp = tmp.sort_index()
+			self.w[k] = tmp
+		for k, v in self.targets.items():
+			tmp = pd.concat(self.targets[k], axis = 0)
+			tmp = tmp.sort_index()
+			self.targets[k] = tmp			
+		for k, v in self.pw.items():
+			tmp = pd.concat(self.pw[k], axis = 0)
+			tmp = tmp.sort_index()			
+			self.pw[k] = tmp		
+		self.joined = True
 		return self
 	
 	def get_results(self):
 		if not self.joined: self.join()
-		self.results={}
+		self.results = {}
 		for key in self.keys:			
-			self.results.update({key:pd.concat([self.s.get(key),self.w.get(key),self.pw.get(key),self.targets.get(key)],axis=1)})
+			self.results.update({key:pd.concat([self.s.get(key), self.w.get(key), self.pw.get(key), self.targets.get(key)], axis = 1)})
 		return self.results		
+
+
+
+class ModelPipes():
+	pass
+

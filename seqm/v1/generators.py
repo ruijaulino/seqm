@@ -8,7 +8,6 @@ def linear(n=1000,a=0,b=0.1,start_date='2000-01-01'):
 	data=pd.DataFrame(np.hstack((y[:,None],x[:,None])),columns=['y1','x1'],index=dates)
 	return data
 
-
 def simulate_mvgmm(n,phi,means,covs):
 	# simulate states
 	z=np.random.choice(np.arange(phi.size,dtype=int),p=phi,size=n)
@@ -16,8 +15,7 @@ def simulate_mvgmm(n,phi,means,covs):
 	for i in range(n):
 		x[i]=np.random.multivariate_normal(means[z[i]],covs[z[i]])
 	return x,z
-
-
+	
 def simulate_hmm(n,A,P,means,covs):
 	'''
 	n: integer with the number of points to generate

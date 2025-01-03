@@ -6,10 +6,10 @@ import copy
 import tqdm
 try:
 	from .constants import *
-	from .generators import linear
+	from .model_pipe import ModelPipe
 except ImportError:
 	from constants import *
-	from generators import linear
+	from model_pipe import ModelPipe
 	
 def add_unix_timestamp(df:pd.DataFrame):
 	# create a column with unix timestamp
@@ -26,9 +26,6 @@ def get_df_cols(df):
 	x_cols=[c for c in cols if c.startswith(FEATURE_PREFIX)]		
 	y_cols=[c for c in cols if c.startswith(TARGET_PREFIX)]
 	return x_cols, y_cols
-
-
-
 
 # container to work with arrays only
 # can derived from a dataframe
@@ -203,6 +200,104 @@ class Data:
 		build train inputs for models		
 		'''
 		return {'x' : self.x, 'y' : self.y, 'z' : self.z, 'idx':self.converted_idx()} 
+
+
+# dict of Data with properties
+class Dataset:
+	def __init__(self, dataset = {}):
+		self.dataset = copy.deepcopy(dataset)
+		# convert dict of DataFrames to Data is necessary
+		for k,v in self.items():
+			if isinstance(v,pd.DataFrame):
+				self[k] = Data.from_df(v)
+		self.folds_ts = []
+		
+	# methods to behave like dict
+	def add(self, key, item: Union[pd.DataFrame,Data]):
+		if isinstance(item, pd.DataFrame):
+			item = Data.from_df(item)
+		else:
+			if not isinstance(item, Data):			
+				raise TypeError("Item must be an instance of pd.DataFrame or Data")
+		self.dataset[key] = item
+
+	def __getitem__(self, key):
+		return self.dataset[key]
+
+	def __setitem__(self, key, item: Union[pd.DataFrame,Data]):
+		if isinstance(item, pd.DataFrame):
+			item = Data.from_df(item)
+		else:
+			if not isinstance(item, Data):			
+				raise TypeError("Item must be an instance of pd.DataFrame or Data")		
+		self.dataset[key] = copy.deepcopy(item)
+
+	def __len__(self):
+		return len(self.dataset)
+
+	def __iter__(self):
+		return iter(self.dataset)
+
+	def keys(self):
+		return self.dataset.keys()
+
+	def values(self):
+		return self.dataset.values()
+
+	def items(self):
+		return self.dataset.items()
+
+	def has_key(self,key:str):
+		return key in self.keys()
+
+	# specific methods
+
+	def split_ts(self, k_folds=3):
+		# join all ts arrays
+		ts = []
+		for k,data in self.dataset.items():
+			ts.append(data.ts)
+		ts = np.hstack(ts)
+		ts = np.unique(ts)
+		idx_folds = np.array_split(ts, k_folds)
+		self.folds_ts = [(fold[0], fold[-1]) for fold in idx_folds]
+		
+		return self
+
+	def train_test_split(
+						self, 
+						test_fold_idx: int, 
+						burn_fraction: float = 0.1, 
+						min_burn_points: int = 1, 
+						seq_path: bool = False) -> List:
+		
+		if seq_path and test_fold_idx == 0:
+			raise ValueError("Cannot start at fold 0 when path is sequential")
+		if len(self.folds_ts) is None:
+			raise ValueError("Need to split before getting the split")
+		# for each Data create a split
+		train_test = []
+
+		for key, data in self.items():
+
+			ts_lower, ts_upper = self.folds_ts[test_fold_idx]			
+			
+			# create training data
+			train_data = data.before(ts = ts_lower, create_new = True)
+			train_data.random_segment(burn_fraction, min_burn_points)			
+			# if path is non sequential add data after the test set
+			if not seq_path:
+				train_data_add = data.after(ts = ts_upper, create_new = True)
+				train_data_add.random_segment(burn_fraction, min_burn_points)
+				train_data.stack(train_data_add, allow_both_empty = True)
+			
+			# get test data
+			test_data = data.between(ts_lower, ts_upper, create_new = True)
+			
+			train_test.append({'key':key, 'train_data': train_data, 'test_data':test_data})
+
+		return train_test
+
 
 if __name__ == '__main__':
 	

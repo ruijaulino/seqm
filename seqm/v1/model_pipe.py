@@ -236,8 +236,8 @@ class ModelPipes:
 		return self.models[key]
 
 	def __setitem__(self, key, item: ModelPipe):
-		if not isinstance(item, ModelPipe):
-			raise TypeError("Item must be an instance of ModelPipe")
+		# if not isinstance(item, ModelPipe):
+		# 	raise TypeError("Item must be an instance of ModelPipe")
 		self.models[key] = copy.deepcopy(item)
 		self.models[key].key = key
 
