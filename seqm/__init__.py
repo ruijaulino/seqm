@@ -1,4 +1,4 @@
-from . import stable
+from . import v1
 from . import models
 from .loads import *
 from .dataset import Dataset
