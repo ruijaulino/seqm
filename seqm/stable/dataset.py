@@ -91,7 +91,7 @@ class Dataset:
 		# 	print('-----')
 		return self
 
-	def set_train_test_fold(
+	def build_local_model_pipe(
 							self, 
 							model_pipes: ModelPipes, 
 							test_index: int, 
@@ -202,7 +202,7 @@ class Dataset:
 			path=Path()
 			for fold_index in range(start_fold, k_folds):			
 				# make a copy of the original model_pipes
-				local_model_pipes = self.set_train_test_fold(
+				local_model_pipes = self.build_local_model_pipe(
 															model_pipes=copy.deepcopy(model_pipes),
 															test_index=fold_index,
 															burn_fraction=burn_fraction,

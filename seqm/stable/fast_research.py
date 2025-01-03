@@ -31,7 +31,7 @@ def linear_model(x, y, calc_s:bool = False, use_qr:bool = True):
     return b, s, w
 
 
-def intraday_linear_models_search(px:pd.DataFrame, pct_fee:float = 0, prev_day_only:bool = False):
+def intraday_linear_models_search_old(px:pd.DataFrame, pct_fee:float = 0, prev_day_only:bool = False):
     '''
     px: pandas DataFrame with a single column with prices    
     '''
@@ -41,6 +41,8 @@ def intraday_linear_models_search(px:pd.DataFrame, pct_fee:float = 0, prev_day_o
     # add day and time columns
     px['day'] = px.index.date
     px['time'] = px.index.time
+    # correct for possible duplicates
+    px = px.drop_duplicates(subset=["day", "time"])
     # pivot the DataFrame
     day_px = px.pivot(index='day', columns='time', values='px')    
     # give column names
