@@ -24,6 +24,7 @@ except ImportError:
     from post_process import post_process,portfolio_post_process
 
 def linear(n = 1000, a = 0, b = 0.1, start_date = '2000-01-01'):
+    np.random.seed(42)
     x = np.random.normal(0, 0.01, n)
     y = a + b*x + np.random.normal(0, 0.01, n)
     dates = pd.date_range(start_date, periods = n, freq = 'D')
@@ -40,25 +41,30 @@ if __name__=='__main__':
     dataset = Dataset({'dataset 1':data1,'dataset 2':data2})   
 
     # create model pipe
-    model=ConditionalGaussian(n_gibbs=None,kelly_std=3,max_w=1)        
+    model = None # ConditionalGaussian(n_gibbs=None,kelly_std=3,max_w=1)        
     model_pipe = ModelPipe(master_model = model)    
     for key in dataset.keys():
-        model = None
-        # model = ConditionalGaussian(n_gibbs=None,kelly_std=3,max_w=1)
+        # model = None
+        model = ConditionalGaussian(n_gibbs=None,kelly_std=3,max_w=1)
         # did not set individual model on purpose
         # but can be done (need to test this feature!)
         model_pipe.add(model = model, x_transform = RollPWScaleTransform(window=10), y_transform = RollPWScaleTransform(window=10), key = key)
 
     # create workflow
     workflow = Workflow(dataset = dataset, model_pipe = model_pipe)
+    # run a cvbt
     paths = workflow.cvbt(k_folds = 10, seq_path = True)
     
+    # post process cvbt results
+    out = workflow.portfolio_post_process()
+    print(out)
+
+    # train a model
     workflow.train()
-    workflow.test()
+    # set data and test a model
+    workflow.set_dataset(dataset).test()
+    # set data and run live
+    print(workflow.set_dataset(dataset).live())
 
-    # print(workflow.live())
-
-    s = portfolio_post_process(workflow.cvbt_paths)
-    print(s)
     # s = portfolio_post_process(paths, pct_fee = {'dataset 1':0, 'dataset 2':0.5,'dataset 3':0})
     # print(s)

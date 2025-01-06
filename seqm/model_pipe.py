@@ -138,6 +138,11 @@ class BaseModelPipe:
 		"""Train the model using the training data contained within this DataElement."""
 		aux = self.train_data.build_train_inputs()
 		self.model.estimate(**aux)
+		self.estimate_pw()
+		return self
+
+	def estimate_pw(self):
+		aux = self.train_data.build_train_inputs()
 		self.train_pw = self.get_pw(aux.get('y'))
 		return self
 
@@ -305,7 +310,9 @@ class ModelPipe:
 			if data.empty: raise Exception('data is empty. should not happen')
 			self.master_model.estimate(**data.build_train_inputs())
 			# set individual copies			
-			for k, e in self.items(): e.set_model(self.master_model)
+			for k, e in self.items(): 
+				e.estimate_pw().set_model(self.master_model)
+				
 		else:
 			for k, m in self.items(): m.estimate()
 		return self

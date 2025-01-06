@@ -9,11 +9,17 @@ try:
     from .containers import Data, Dataset
     from .model_pipe import ModelPipe, Path
     from .loads import save_file, load_file
+    from .post_process import post_process, portfolio_post_process
+
 except ImportError:
     from constants import *
     from containers import Data, Dataset
     from model_pipe import ModelPipe, Path
     from loads import save_file, load_file
+    from post_process import post_process, portfolio_post_process
+    
+
+
 
 class Workflow:
     def __init__(self, dataset:Dataset, model_pipe:ModelPipe):
@@ -26,34 +32,11 @@ class Workflow:
 
     def set_dataset(self, dataset:Dataset):
         self.dataset = dataset
+        return self
 
     def set_model_pipe(self, model_pipe: ModelPipe):
         self.model_pipe = model_pipe
-
-    # change name, pass operations to workflow
-    def dataset_to_model_pipe(
-                            self, 
-                            test_index: int, 
-                            burn_fraction: float = 0.1, 
-                            min_burn_points: int = 1, 
-                            seq_path: bool = False) -> ModelPipe:
-        
-        model_pipe = copy.deepcopy(self.model_pipe)
-        for key, data in self.dataset.items():
-            ts_lower, ts_upper = self.dataset.folds_ts[test_index]          
-            train_data = data.before(ts = ts_lower, create_new = True)
-            train_data.random_segment(burn_fraction, min_burn_points)           
-            # if path is non sequential add data after the test set
-            if not seq_path:
-                train_data_add = data.after(ts = ts_upper, create_new = True)
-                train_data_add.random_segment(burn_fraction, min_burn_points)
-                train_data.stack(train_data_add, allow_both_empty = True)
-            test_data = data.between(ts_lower, ts_upper, create_new = True)
-            if train_data.empty or test_data.empty:
-                model_pipe.remove(key)
-            else:
-                model_pipe.set_data(key, train_data, test_data)
-        return model_pipe
+        return self
 
     def cvbt(self, k_folds:int = 4, seq_path:bool = False, start_fold:int = 0, n_paths:int = 4, burn_fraction:float = 0.1, min_burn_points:int = 3):        
         # create folds splits
@@ -87,7 +70,38 @@ class Workflow:
                 cvbt_path.add(local_model_pipe)
             cvbt_path.join()
             self.cvbt_paths.append(cvbt_path.get_results())
+        self.paths = self.cvbt_paths
         return self.cvbt_paths
+
+    # call functions from post process that are implemented on other file
+    def post_process(self, pct_fee = 0., seq_fees = False, sr_mult = 1, n_boot = 1000, key = None, start_date = '', end_date = '', output_paths:bool = True):
+        return post_process(
+                    paths = self.paths, 
+                    pct_fee = pct_fee,
+                    seq_fees = seq_fees,
+                    sr_mult = sr_mult,
+                    n_boot = n_boot,
+                    key = key,
+                    start_date = start_date,
+                    end_date = end_date,
+                    output_paths = output_paths
+                    )
+
+    def portfolio_post_process(self, pct_fee = 0., seq_fees = False, sr_mult = 1,n_boot = 1000, view_weights = True, use_pw = True, multiplier = 1, start_date = '', end_date = '', n_boot_datasets:int = None, output_paths:bool = True):
+        return portfolio_post_process(
+                                paths = self.paths, 
+                                pct_fee = pct_fee,
+                                seq_fees = seq_fees,
+                                sr_mult = sr_mult,
+                                n_boot = n_boot,
+                                view_weights = view_weights,
+                                use_pw = use_pw,
+                                multiplier = multiplier,
+                                start_date = start_date,
+                                end_date = end_date,
+                                n_boot_datasets = n_boot_datasets,
+                                output_paths = output_paths
+                                )
 
     # main methods to make studies on the dataset
     def train(self):
@@ -98,8 +112,7 @@ class Workflow:
         self.model_pipe.estimate()
         return self.model_pipe
 
-    def test(self, dataset:Dataset = None):    
-        if dataset: self.dataset = dataset
+    def test(self):    
         self.test_path = Path()
         for key, data in self.dataset.items():
             self.model_pipe.set_test_data(key, data)
@@ -107,10 +120,11 @@ class Workflow:
         self.test_path.add(self.model_pipe)
         self.test_path.join()
         self.test_path = [self.test_path.get_results()]
+        self.paths = self.test_path
         return self.test_path
 
-    def live(self, dataset:Dataset = None):
-        if dataset: self.dataset = dataset
+
+    def live(self):
         out = {}
         for key, data in self.dataset.items():
             if self.model_pipe.has_keys(key):
@@ -138,7 +152,8 @@ class Workflow:
                 out.update({key:{'w':w,'pw':pw}})       
         # compute pw sum
         pw_sum = 0
-        for k,v in self.model_pipe.items(): pw_sum+=v.train_pw
+        for k,v in self.model_pipe.items():             
+            pw_sum+=v.train_pw
         out.update({'total_pw':pw_sum})
         return out
 
