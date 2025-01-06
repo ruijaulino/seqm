@@ -88,7 +88,7 @@ def simulate_hmm(n,A,P,means,covs):
 
 
 # UTILITIES
-
+PROB_NUM_PREC=1e-8
 def mvgauss_prob(x,mean,cov_inv,cov_det):
 	'''
 	x: numpy (n,p) array 
@@ -105,8 +105,10 @@ def mvgauss_prob(x,mean,cov_inv,cov_det):
 	k=mean.size # number of variables
 	x_c=x-mean # center x
 	# vectorized computation
-	return np.exp(-0.5*np.sum(x_c*np.dot(x_c,cov_inv),axis=1))/np.sqrt(np.power(2*np.pi,k)*cov_det)
-
+	#return np.exp(-0.5*np.sum(x_c*np.dot(x_c,cov_inv),axis=1))/np.sqrt(np.power(2*np.pi,k)*cov_det)
+	out = np.exp(-0.5*np.sum(x_c*np.dot(x_c,cov_inv),axis=1))/np.sqrt(np.power(2*np.pi,k)*cov_det)
+	out[out < PROB_NUM_PREC] = PROB_NUM_PREC
+	return out
 
 def create_q(n_states,z_lags):
 	'''
@@ -1766,7 +1768,20 @@ class StateConditionalGaussianMixture(object):
 
 # Gaussian HMM
 class GaussianHMM(object):
-	def __init__(self,n_states=2,n_gibbs=1000,A_zeros=[],A_groups=[],f_burn=0.1,max_k=0.25,pred_l=None,allowed_sides='all', bias_reduction=0,**kwargs):
+	def __init__(
+				self, 
+				n_states = 2, 
+				n_gibbs = 1000, 
+				A_zeros = [], 
+				A_groups=[], 
+				f_burn = 0.1,
+				max_k = 0.25,
+				pred_l = None,
+				allowed_sides = 'all', 
+				bias_reduction = 0,
+				irregular_obs=False,
+				independent_vars=False,				
+				**kwargs):
 		'''
 		n_states: integer with the number of states
 		n_gibbs: integer with the number of gibbs iterations
@@ -1788,6 +1803,12 @@ class GaussianHMM(object):
 		self.pred_l=pred_l
 		self.allowed_sides=allowed_sides
 		self.bias_reduction = bias_reduction
+
+		self.independent_vars = independent_vars
+		self.irregular_obs = irregular_obs        
+		if self.irregular_obs: # if we have irregular observations, force the variables to be independent!
+			self.independent_vars = True
+
 		if len(self.A_groups)==0:
 			self.A_groups=[[e] for e in range(self.n_states)]   
 		self.eff_n_states=len(self.A_groups)
@@ -1856,47 +1877,70 @@ class GaussianHMM(object):
 					plt.grid(True)
 					plt.show()
 
-	def next_state_prob(self,y,l=None):
+	def next_state_prob(self, y, l = None):
 		'''
 		computes a vector with the next state probability
 		given a input sequence
 		xyq: numpy (n,self.p) array with observation
 		l: integer to filter recent data in y -> y=y[-l:]
 		'''
-		assert y.ndim==2,"y must be a matrix"
+		assert y.ndim == 2, "y must be a matrix"
 		# just return the initial state probability 
-		if y.shape[0]==0:
+		if y.shape[0] == 0:
 			return self.P
 
-		assert y.shape[1]==self.p,"y must have the same number of variables as the training data"
+		assert y.shape[1] == self.p, "y must have the same number of variables as the training data"
 		if l is not None:
-			y=y[-l:]
+			y = y[-l:]
 		if self.states_cov_inv is None:
-			self.states_cov_inv=np.zeros((self.eff_n_states,self.p,self.p))			
-			self.states_cov_det=np.zeros(self.eff_n_states)
+			self.states_cov_inv = np.zeros((self.eff_n_states,self.p,self.p))			
+			self.states_cov_det = np.zeros(self.eff_n_states)
 			for s in range(self.eff_n_states):
-				self.states_cov_inv[s]=np.linalg.inv(self.states_cov[s])
-				self.states_cov_det[s]=np.linalg.det(self.states_cov[s])
-		n=y.shape[0]
+				self.states_cov_inv[s] = np.linalg.inv(self.states_cov[s])
+				self.states_cov_det[s] = np.linalg.det(self.states_cov[s])
+		n = y.shape[0]
 		# declare arrays		
 		# probability of observations given state
-		prob=np.zeros((n,self.n_states),dtype=np.float64) 
+		prob = np.zeros((n,self.n_states), dtype = np.float64) 
 		# probability of observations given state		
-		eff_prob=np.zeros((n,self.eff_n_states),dtype=np.float64) 
+		eff_prob = np.zeros((n,self.eff_n_states), dtype = np.float64) 
 		for s in range(self.eff_n_states):
-			# use vectorized function
-			eff_prob[:,s]=mvgauss_prob(
-										y,
-										self.states_mean[s],
-										self.states_cov_inv[s],
-										self.states_cov_det[s]
-										)
-			prob[:,self.A_groups[s]]=eff_prob[:,[s]]  
+			if self.independent_vars:
+				# emission variables are independent
+				# we can process this more easily by just multiplying probs
+				# also, if there are nan's in the data we can solve the problem
+				# here as well
+				p_tmp = np.ones(prob.shape[0])
+				for pi in range(self.p):
+					cov_inv = np.array([[1/self.states_cov[s][pi,pi]]])
+					cov_det = self.states_cov[s][pi,pi]
+					if self.irregular_obs:                               
+						p_tmp[non_nan_indexes[pi]] *= mvgauss_prob(
+														y[non_nan_indexes[pi],pi][:,None],
+														np.array([self.gibbs_mean[s,i-1][pi]]),
+														cov_inv,cov_det)                         
+					else:
+						p_tmp *= mvgauss_prob(
+										y[:,pi][:,None],
+										np.array([self.states_mean[s][pi]]),
+										cov_inv,
+										cov_det)                         
+				eff_prob[:,s]=p_tmp
+				prob[:,self.A_groups[s]]=eff_prob[:,[s]] 
+			else:
+				eff_prob[:,s]=mvgauss_prob(
+											y,
+											self.states_mean[s],
+											self.states_cov_inv[s],
+											self.states_cov_det[s]
+											)
+				prob[:,self.A_groups[s]]=eff_prob[:,[s]] 
+		
 		alpha,_=forward(prob,self.A,self.P)
 		next_state_prob=np.dot(self.A.T,alpha[-1])  
 		return next_state_prob
 	
-	def get_weight(self,y,normalize=True,**kwargs):
+	def get_weight(self, y, normalize = True, **kwargs):
 		'''
 		compute betting weight given an input sequence
 		y: numpy (n,p) array with a sequence
@@ -1934,7 +1978,7 @@ class GaussianHMM(object):
 			w/=self.w_norm
 		return w
 
-	def estimate(self,y,idx=None,**kwargs):	 
+	def estimate(self, y, idx = None, **kwargs):	 
 		'''
 		Estimate the HMM parameters with Gibbs sampling
 		y: numpy (n,p) array
@@ -1968,12 +2012,24 @@ class GaussianHMM(object):
 		# generate variable with the possible states
 		states=np.arange(self.n_states,dtype=np.int32)
 
+		# create list to store the indexes where each variable is
+		# not nan. This is used in next steps as well
+		non_nan_indexes=[]
 		# compute data covariance
-		c=np.cov(y.T)
+		if self.irregular_obs:
+			# if observations are irregular then we must filter for non NaN values
+			c=np.zeros((self.p, self.p))
+			for i in range(self.p):
+				nniv = ~np.isnan(y[:,i])
+				non_nan_indexes.append(nniv)
+				c[i,i]=np.var(y[nniv,i])
+		else:
+			c = np.cov(y.T,ddof=0)
 		# fix when y has only one column
-		if c.ndim==0:
+		if c.ndim == 0:
 			c=np.array([[c]])
 		c_diag=np.diag(np.diag(c)) # diagonal matrix with the covariances
+
 
 		# Prior distribution parameters
 		# these parameters make sense for the type of problems
@@ -2072,15 +2128,42 @@ class GaussianHMM(object):
 			init_state_counter*=0 # set this to zero
 			# evaluate the probability of each
 			# observation in y under the previously 
-			# sampled parameters
+			# sampled parameters			
 			for s in range(self.eff_n_states):
-				# compute inverse and determinant
-				cov_inv=np.linalg.inv(self.gibbs_cov[s,i-1])
-				cov_det=np.linalg.det(self.gibbs_cov[s,i-1])
-				# use vectorized function
-				eff_prob[:,s]=mvgauss_prob(y,self.gibbs_mean[s,i-1],cov_inv,cov_det)  
-				prob[:,self.A_groups[s]]=eff_prob[:,[s]]			
-			
+				if self.independent_vars:
+					# emission variables are independent
+					# we can process this more easily by just multiplying probs
+					# also, if there are nan's in the data we can solve the problem
+					# here as well
+					p_tmp=np.ones(prob.shape[0])
+					for pi in range(self.p):
+						cov_inv=np.array([[1/self.gibbs_cov[s,i-1][pi,pi]]])
+						cov_det=self.gibbs_cov[s,i-1][pi,pi]
+						if self.irregular_obs:                               
+							p_tmp[non_nan_indexes[pi]]*=mvgauss_prob(
+															y[non_nan_indexes[pi],pi][:,None],
+															np.array([self.gibbs_mean[s,i-1][pi]]),
+															cov_inv,
+															cov_det) 
+						else:
+							p_tmp*=mvgauss_prob(
+											y[:,pi][:,None],
+											np.array([self.gibbs_mean[s,i-1][pi]]),
+											cov_inv,
+											cov_det)                         
+					eff_prob[:,s]=p_tmp
+					prob[:,self.A_groups[s]]=eff_prob[:,[s]]
+				else:
+					# compute inverse and determinant
+					cov_inv=np.linalg.inv(self.gibbs_cov[s,i-1])
+					cov_det=np.linalg.det(self.gibbs_cov[s,i-1])
+					# use vectorized function
+					eff_prob[:,s]=mvgauss_prob(y,self.gibbs_mean[s,i-1],cov_inv,cov_det)  
+					prob[:,self.A_groups[s]]=eff_prob[:,[s]]
+
+
+
+			# -------------------------------
 			# use multiple sequences
 
 			for l in range(n_seqs):		 
@@ -2118,7 +2201,18 @@ class GaussianHMM(object):
 				else:
 					n_count=idx_states.size
 					x_=y[idx_states]
-					y_mean_=np.mean(x_,axis=0)
+
+					if self.irregular_obs:
+						y_mean_=np.zeros(self.p)
+						for pi in range(self.p):
+							aux=np.where(~np.isnan(x_[:,pi]))[0]
+							if aux.size!=0:
+								y_mean_[pi]=np.mean(x_[aux,pi])
+							else:
+								y_mean_[pi]=self.gibbs_mean[j,i-1][pi]
+					else:
+					    y_mean_=np.mean(x_,axis=0)
+
 					# ---------------------
 					# sample for mean
 					invC=np.linalg.inv(self.gibbs_cov[j,i-1])
@@ -2126,6 +2220,8 @@ class GaussianHMM(object):
 					mn=np.dot(Vn,invV0m0+n_count*np.dot(invC,y_mean_))
 					prev_mn[j]=mn
 					prev_Vn[j]=Vn
+					if self.independent_vars:
+						Vn=np.diag(np.diag(Vn))					
 					self.gibbs_mean[j,i]=np.random.multivariate_normal(mn,Vn)
 					# sample from cov
 					# get random k value (shrinkage value)
@@ -2134,11 +2230,28 @@ class GaussianHMM(object):
 					S0=n0*S0aux
 					v0=n0+self.p+1
 					vn=v0+n_count
-					St=np.dot((x_-self.gibbs_mean[j,i]).T,(x_-self.gibbs_mean[j,i]))
+					
+					if self.irregular_obs:
+						# we are forcing them to be independent if there are errors
+						St=np.zeros((self.p,self.p))
+						for pi in range(self.p):
+							aux=np.where(~np.isnan(x_[:,pi]))[0]
+							if aux.size!=0:
+								St[pi,pi]=np.sum(np.power(x_[aux,pi]-self.gibbs_mean[j,i][pi],2))
+							else:
+								St[pi,pi]=prev_Sn[j][pi,pi]
+					else:
+						St=np.dot((x_-self.gibbs_mean[j,i]).T,(x_-self.gibbs_mean[j,i]))
+
+
 					Sn=S0+St
 					prev_vn[j]=vn
 					prev_Sn[j]=Sn
-					self.gibbs_cov[j,i]=invwishart.rvs(df=vn,scale=Sn)				 
+					if self.independent_vars:
+						Sn=np.diag(np.diag(Sn))					
+					self.gibbs_cov[j,i]=invwishart.rvs(df=vn,scale=Sn)	
+					if self.independent_vars:
+						self.gibbs_cov[j,i]=np.diag(np.diag(self.gibbs_cov[j,i])) 								 
 
 		# burn observations
 		self.gibbs_A=self.gibbs_A[-self.n_gibbs:]
@@ -2171,7 +2284,6 @@ class GaussianHMM(object):
 			self.equilibrium_state = np.dot(self.A.T, self.equilibrium_state)
 
 
-		#print('Equilibrium distribution: ', self.equilibrium_state)
 		# group next state prob
 		tmp=np.zeros(self.eff_n_states)
 		for i,e in enumerate(self.A_groups):
@@ -2188,6 +2300,113 @@ class GaussianHMM(object):
 		self.equilibrium_w=np.dot(np.linalg.inv(cov),mu)
 		# print('Equilibrium Weight: ', self.equilibrium_w)
 
+
+
+class ExtGaussianHMM(object):
+	def __init__(
+				self, 
+				n_states = 2, 
+				n_gibbs = 1000, 
+				A_zeros = [], 
+				A_groups=[], 
+				f_burn = 0.1,
+				max_k = 0.25,
+				pred_l = None,
+				irregular_obs = False,
+				independent_vars = False,				
+				**kwargs):
+		self.n_states = n_states
+		self.n_gibbs = n_gibbs
+		self.A_zeros = A_zeros
+		self.A_groups = A_groups
+		if len(self.A_groups)==0:
+			self.A_groups=[[e] for e in range(self.n_states)]   
+		self.eff_n_states=len(self.A_groups)		
+		self.f_burn = f_burn
+		self.max_k = max_k
+		self.pred_l = pred_l
+		self.irregular_obs = irregular_obs
+		self.independent_vars = independent_vars
+		self.ghmm = None
+		self.p = 1
+
+	def estimate(self, y, t, idx = None, **kwargs):
+		t = t.copy()
+
+		y = y.copy()		
+		if t.ndim == 1:
+			t = t[:,None]
+		if y.ndim == 1:
+			y = y[:,None]		
+		p = y.shape[1]
+		q = t.shape[1]		
+		z = np.hstack((y,t))
+	
+		self.ghmm = GaussianHMM(
+							n_states = self.n_states,
+							n_gibbs = self.n_gibbs,
+							A_zeros = self.A_zeros,
+							A_groups = self.A_groups,
+							f_burn = self.f_burn,
+							max_k = self.max_k,
+							pred_l = self.pred_l,
+							irregular_obs = self.irregular_obs,
+							independent_vars = self.independent_vars,
+							)
+		self.ghmm.estimate(z, idx = idx)
+
+		self.p = p		
+		# extract distribution of y|x from the estimated covariance
+		y_idx=np.arange(p)
+	
+		self.states_mean = np.zeros((self.n_states, p))
+		self.states_cov=np.zeros((self.n_states,p,p))
+		self.w_norm=0
+
+		# compute w norm
+		self.states_cov_inv=np.zeros_like(self.states_cov)
+		self.states_cov_det=np.zeros(self.n_states)
+		
+		for i in range(self.n_states):
+			self.states_mean[i] = self.ghmm.states_mean[i][y_idx]
+			self.states_cov[i] = self.ghmm.states_cov[i][y_idx][:,y_idx]	
+			self.states_cov_inv[i]=np.linalg.inv(self.states_cov[i])
+			self.states_cov_det[i]=np.linalg.det(self.states_cov[i])
+			self.w_norm=max(self.w_norm,np.sum(np.abs(np.dot(self.states_cov_inv[i],self.states_mean[i])))  )
+
+	def get_weight(self, y, t, **kwargs):
+		'''
+		compute betting weight given an input sequence
+		y: numpy (n,p) array with a sequence
+			each point is a joint observations of the variables
+		l: integer to filter recent data in y -> y=y[-l:]
+		returns:
+			w: numpy (p,) array with weights to allocate to each asset
+			in y
+		'''
+		if t.ndim == 1:
+			t = t[:,None]
+		if y.ndim == 1:
+			y = y[:,None]		
+		z = np.hstack((y,t))
+
+		next_state_prob = self.ghmm.next_state_prob(z, self.pred_l)		
+		# group next state prob
+		tmp = np.zeros(self.eff_n_states)
+		for i, e in enumerate(self.A_groups):
+			tmp[i]=np.sum(next_state_prob[e])
+		next_state_prob=tmp		
+		# compute expected value		
+		mu = np.sum(self.states_mean*next_state_prob[:,None],axis=0)
+		# compute second central moment of the mixture distribution
+		cov = np.zeros((self.p, self.p))
+		for s in range(self.eff_n_states):
+			cov += (next_state_prob[s]*self.states_cov[s])
+			cov += (next_state_prob[s]*self.states_mean[s]*self.states_mean[s][:,None])
+		cov -= (mu*mu[:,None])
+		w = np.dot(np.linalg.inv(cov),mu)
+		w/=self.w_norm
+		return w
 
 class ConditionalGaussianHMM(object):
 	def __init__(self,n_states=2,n_gibbs=1000,A_zeros=[],A_groups=[],f_burn=0.1,max_k=0.25,kelly_std=2,max_w=1,pred_l=None):

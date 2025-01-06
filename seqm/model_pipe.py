@@ -147,14 +147,14 @@ class BaseModelPipe:
 		return self
 
 	# get weight
-	def get_weight(self, xq, x, y, z, apply_transform_x = True, apply_transform_y = True):
+	def get_weight(self, xq, x, y, z, t, apply_transform_x = True, apply_transform_y = True):
 		# process inputs
 		if apply_transform_y: y = self.transform_y(y, True)
 		if x is not None:
 			if apply_transform_x: x = self.transform_x(x, True)
 		if xq is not None:
 			if apply_transform_x: xq = self.transform_x(xq, True)
-		return self.model.get_weight(**{'y': y, 'x': x, 'xq': xq, 'z':z})
+		return self.model.get_weight(**{'y': y, 'x': x, 'xq': xq, 'z':z, 't':t})
 	
 	# get portfolio weights from the transform
 	def get_pw(self,y):
@@ -188,10 +188,13 @@ class BaseModelPipe:
 				# the x input is already normalized!
 				xq_ = None
 				x_ = None
+				t_ = None
 				z_ = None
 				if self.test_data.has_x:
 					xq_ = self.test_data.x[i]
 					x_ = self.test_data.x[idx[l][0]:i]
+				if self.test_data.has_t:
+					t_ = self.test_data.t[idx[l][0]:i]					
 				if self.test_data.has_z:
 					z_ = self.test_data.z[i]
 				w = self.get_weight(
@@ -199,6 +202,7 @@ class BaseModelPipe:
 									x = x_, 
 									y = self.test_data.y[idx[l][0]:i], 
 									z = z_,
+									t = t_,
 									apply_transform_x = True, 
 									apply_transform_y = True
 									)

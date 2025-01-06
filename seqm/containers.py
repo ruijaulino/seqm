@@ -23,15 +23,16 @@ def unix_timestamp_to_index(df:pd.DataFrame):
 
 def get_df_cols(df):
 	cols = df.columns.tolist()
-	x_cols=[c for c in cols if c.startswith(FEATURE_PREFIX)]		
-	y_cols=[c for c in cols if c.startswith(TARGET_PREFIX)]
-	return x_cols, y_cols
+	x_cols = [c for c in cols if c.startswith(FEATURE_PREFIX)]		
+	y_cols = [c for c in cols if c.startswith(TARGET_PREFIX)]
+	t_cols = [c for c in cols if c.startswith(NON_TRADEABLE_TARGET_COL)]
+	return x_cols, t_cols, y_cols
 
 # container to work with arrays only
 # can derived from a dataframe
 # provides a good analogy if the code is to be made in other language without dataframes
 class Data:
-	def __init__(self, y, x, z, idx, ts, x_cols, y_cols, safe_arrays = True):
+	def __init__(self, y, x, z, idx, t, ts, x_cols, t_cols, y_cols, safe_arrays = True):
 		# add unix timestamp
 		# self.empty = True if y is None else False
 		self.empty = True if y is None else True if y.shape[0] == 0 else False
@@ -39,10 +40,13 @@ class Data:
 		self.x = None if x is None else np.copy(x) if safe_arrays else x
 		self.z = None if z is None else np.copy(z) if safe_arrays else z
 		self.idx = None if idx is None else np.copy(idx) if safe_arrays else idx
+		self.t = None if t is None else np.copy(t) if safe_arrays else t
 		self.ts = None if ts is None else np.copy(ts) if safe_arrays else ts
-		self.x_cols,self.y_cols = x_cols,y_cols
+		self.x_cols, self.t_cols, self.y_cols = x_cols, t_cols, y_cols
 		self.has_x = False if self.x is None else True
+		self.has_t = False if self.t is None else True
 		self.has_z = False if self.z is None else True
+
 		
 		if self.idx is None: self.idx = np.zeros(self.y.shape[0],dtype=int)
 		self.fix_idx()
@@ -98,6 +102,9 @@ class Data:
 		# get x array		
 		x = df.iloc[:, df.columns.str.startswith(FEATURE_PREFIX)].values
 		if x.shape[1] == 0: x = None
+		# get e array
+		t = df.iloc[:, df.columns.str.startswith(NON_TRADEABLE_TARGET_COL)].values
+		if t.shape[1] == 0: t = None
 		# get z
 		z = df.iloc[:, [e==STATE_COL for e in df.columns.tolist()]].values
 		if z.shape[1] == 0: z = None
@@ -107,21 +114,23 @@ class Data:
 		ts = df['ts'].values
 		idx = df.iloc[:, [e==MULTISEQ_IDX_COL for e in df.columns.tolist()]].values
 		idx = None if idx.shape[1] == 0 else np.array(idx[:,0],dtype=int)
-		x_cols, y_cols = get_df_cols(df)		
-		return cls(y, x, z, idx, ts, x_cols, y_cols, safe_arrays)
+		x_cols, t_cols, y_cols = get_df_cols(df)		
+		return cls(y, x, z, idx, t, ts, x_cols, t_cols, y_cols, safe_arrays)
 
 	def _from_idx(self, idx:np.ndarray, create_new = False):		
 		y_ = self.y[idx]
 		ts_ = self.ts[idx]
 		idx_ = self.idx[idx]
 		x_ = self.x[idx] if self.has_x else None
+		t_ = self.t[idx] if self.has_t else None
 		z_ = self.z[idx] if self.has_z else None 
 		if create_new:
-			return Data(y_, x_, z_, idx_, ts_, self.x_cols, self.y_cols, safe_arrays=True)
+			return Data(y_, x_, z_, idx_, t_, ts_, self.x_cols, self.t_cols, self.y_cols, safe_arrays=True)
 		else:
 			self.empty = True if y_ is None else True if y_.shape[0] == 0 else False
 			self.y = y_
 			self.x = x_
+			self.t = t_
 			self.ts = ts_
 			self.z = z_
 			self.idx = idx_
@@ -160,9 +169,11 @@ class Data:
 		self.y = data.y
 		self.x = data.x
 		self.z = data.z
+		self.t = data.t
 		self.idx = data.idx
 		self.ts = data.ts
 		self.x_cols = data.x_cols
+		self.t_cols = data.t_cols
 		self.y_cols = data.y_cols
 		self.has_x = data.has_x
 		self.has_z = data.has_z
@@ -185,6 +196,7 @@ class Data:
 		self.y = np.vstack((self.y,data.y))		
 		self.ts = np.hstack((self.ts,data.ts))
 		if self.has_x: self.x = np.vstack((self.x,data.x))
+		if self.has_t: self.t = np.vstack((self.t,data.t))
 		if self.has_z: self.z = np.vstack((self.z,data.z))
 		self.idx = np.hstack((self.idx,data.idx+self.idx[-1]-data.idx[0]+1))
 		return self		
@@ -192,6 +204,7 @@ class Data:
 	def check_cols(self, data:'Data'):
 		assert self.x_cols == data.x_cols,"x_cols are different"
 		assert self.y_cols == data.y_cols,"x_cols are different"
+		assert self.t_cols == data.t_cols,"t_cols are different"
 		assert self.has_z == data.has_z,"z is different"
 		return self
 
@@ -199,7 +212,7 @@ class Data:
 		'''
 		build train inputs for models		
 		'''
-		return {'x' : self.x, 'y' : self.y, 'z' : self.z, 'idx':self.converted_idx()} 
+		return {'x' : self.x, 'y' : self.y, 'z' : self.z, 'idx':self.converted_idx(), 't': self.t} 
 
 
 # dict of Data with properties
