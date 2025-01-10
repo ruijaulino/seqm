@@ -36,11 +36,13 @@ class BaseModelPipe:
 				model = None, 
 				x_transform:BaseTransform = None, 
 				y_transform:BaseTransform = None,
+				t_transform:BaseTransform = None,
 				w_precision = 0.0001,
 				key: str = 'no key defined'
 				):
 		self.model = copy.deepcopy(model)
 		self.x_transform = copy.deepcopy(x_transform) if x_transform is not None else IdleTransform()  # Store the class, not an instance
+		self.t_transform = copy.deepcopy(t_transform) if t_transform is not None else IdleTransform()  # Store the class, not an instance
 		self.y_transform = copy.deepcopy(y_transform) if y_transform is not None else IdleTransform()  # Store the class, not an instance
 		self.w_precision = w_precision
 		self.key = key or 'Dataset'
@@ -89,6 +91,11 @@ class BaseModelPipe:
 		self.x_transform = x_transform
 		return self
 
+	def set_t_transform(self, t_transform:BaseTransform):
+		self.t_transform = t_transform
+		return self
+
+		
 	def set_y_transform(self, y_transform:BaseTransform):
 		self.y_transform = y_transform
 		return self
@@ -113,14 +120,19 @@ class BaseModelPipe:
 		if self.train_data.has_x: self.x_transform.fit(self.train_data.x)
 		return self
 
+	def fit_t_transform(self):
+		if self.train_data.has_t: self.t_transform.fit(self.train_data.t)
+		return self		
+
 	def fit_y_transform(self):
 		self.y_transform.fit(self.train_data.y)
 		return self
 
 	def fit_transform(self):
-		self.fit_x_transform().fit_y_transform()
+		self.fit_x_transform().fit_t_transform().fit_y_transform()
 		# apply transform
 		if self.train_data.has_x: self.train_data.x = self.transform_x(self.train_data.x)
+		if self.train_data.has_t: self.train_data.t = self.transform_t(self.train_data.t)
 		self.train_data.y = self.transform_y(self.train_data.y)
 
 	# apply transform
@@ -129,6 +141,11 @@ class BaseModelPipe:
 		if copy_array: x = np.array(x)
 		return self.x_transform.transform(x)
 	
+	def transform_t(self, t:np.ndarray, copy_array:bool = True):
+		if copy_array: t = np.array(t)
+		return self.t_transform.transform(t)
+	
+
 	def transform_y(self, y:np.ndarray, copy_array:bool = True):
 		if copy_array: y = np.array(y)
 		return self.y_transform.transform(y)
@@ -147,11 +164,13 @@ class BaseModelPipe:
 		return self
 
 	# get weight
-	def get_weight(self, xq, x, y, z, t, apply_transform_x = True, apply_transform_y = True):
+	def get_weight(self, xq, x, y, z, t, apply_transform_x = True, apply_transform_t = True, apply_transform_y = True):
 		# process inputs
 		if apply_transform_y: y = self.transform_y(y, True)
 		if x is not None:
 			if apply_transform_x: x = self.transform_x(x, True)
+		if t is not None:
+			if apply_transform_t: t = self.transform_t(t, True)			
 		if xq is not None:
 			if apply_transform_x: xq = self.transform_x(xq, True)
 		return self.model.get_weight(**{'y': y, 'x': x, 'xq': xq, 'z':z, 't':t})
@@ -204,6 +223,7 @@ class BaseModelPipe:
 									z = z_,
 									t = t_,
 									apply_transform_x = True, 
+									apply_transform_t = True,
 									apply_transform_y = True
 									)
 				w = round_weight(w = w, w_precision = self.w_precision)
@@ -231,11 +251,11 @@ class ModelPipe:
 			print()
 			print()
 
-	def add(self, model = None, x_transform:BaseTransform = None, y_transform:BaseTransform = None, w_precision = 0.0001, key: str = 'no key defined'):
+	def add(self, model = None, x_transform:BaseTransform = None, t_transform:BaseTransform = None, y_transform:BaseTransform = None, w_precision = 0.0001, key: str = 'no key defined'):
 		'''
 		Create a new instance of BaseModelPipe
 		'''
-		self.base_model_pipes[key] = BaseModelPipe(model = model, x_transform = x_transform, y_transform = y_transform, w_precision = w_precision, key = key)
+		self.base_model_pipes[key] = BaseModelPipe(model = model, x_transform = x_transform, t_transform = t_transform, y_transform = y_transform, w_precision = w_precision, key = key)
 		
 	def __getitem__(self, key):
 		return self.base_model_pipes.get(key, None)

@@ -288,13 +288,16 @@ def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fee
 			path_w_sum.columns = keys_sample
 			# fill na with zero
 			path_s=path_s.fillna(0)
+			path_count_non_zero = path_pw.copy(deep = True)
+			path_count_non_zero = path_count_non_zero.fillna(0)
+			
 			path_pw=path_pw.fillna(method = 'ffill')
 			path_w_abs_sum=path_w_abs_sum.fillna(0)
 			path_w_sum = path_w_sum.fillna(0)
 
 			path_pw/=np.sum(np.abs(path_pw),axis=1).values[:,None]
 			path_pw*=multiplier
-			non_zero_counts = path_pw.apply(lambda row: (row != 0).sum(), axis=1)
+			non_zero_counts = path_count_non_zero.apply(lambda row: (row != 0).sum(), axis=1)
 		
 			path_s=pd.DataFrame(np.sum(path_s*path_pw,axis=1),columns=['s'])
 

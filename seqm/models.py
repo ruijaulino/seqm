@@ -1762,8 +1762,42 @@ class StateConditionalGaussianMixture(object):
 
 
 
+def block_bootstrap(X, block_size_range, output_size):
+    """
+    Perform block bootstrap to generate a single resampled time series.
 
+    Parameters:
+    - X: numpy array of shape (n, p), where n is the time dimension.
+    - block_size_range: tuple (min_block_size, max_block_size), range of block sizes.
+    - output_size: int, number of rows in the resampled output array.
 
+    Returns:
+    - resampled: numpy array of shape (output_size, p).
+    """
+    n, p = X.shape
+    min_block_size, max_block_size = block_size_range
+    min_block_size = max(1, min_block_size)
+    max_block_size = min(max_block_size, n-1)
+    # Pre-allocate the output array
+    resampled = np.empty((output_size, p))
+    
+    total_sampled = 0  # Track the total number of rows sampled
+
+    while total_sampled < output_size:
+        # Choose a random block size within the specified range
+        block_size = np.random.randint(min_block_size, max_block_size + 1)
+        # Ensure the block size doesn't exceed the remaining rows to be filled
+        block_size = min(block_size, output_size - total_sampled)
+
+        # Choose a random starting point for the block
+        start_idx = np.random.randint(0, n - block_size + 1)
+        # Extract the block
+        block = X[start_idx:start_idx + block_size]
+        # Copy the block into the pre-allocated array
+        resampled[total_sampled:total_sampled + block_size] = block
+        total_sampled += block_size
+
+    return resampled
 
 
 # Gaussian HMM
@@ -1780,7 +1814,11 @@ class GaussianHMM(object):
 				allowed_sides = 'all', 
 				bias_reduction = 0,
 				irregular_obs=False,
-				independent_vars=False,				
+				independent_vars=False,	
+				block_size_range_frac_min = None,
+				block_size_range_frac_max = None,
+				check_sampling_distribution = False,
+				output_size_mult = None,
 				**kwargs):
 		'''
 		n_states: integer with the number of states
@@ -1808,6 +1846,12 @@ class GaussianHMM(object):
 		self.irregular_obs = irregular_obs        
 		if self.irregular_obs: # if we have irregular observations, force the variables to be independent!
 			self.independent_vars = True
+
+
+		self.block_size_range_frac_min = block_size_range_frac_min
+		self.block_size_range_frac_max = block_size_range_frac_max
+		self.output_size_mult = output_size_mult
+		self.check_sampling_distribution = check_sampling_distribution
 
 		if len(self.A_groups)==0:
 			self.A_groups=[[e] for e in range(self.n_states)]   
@@ -1995,7 +2039,15 @@ class GaussianHMM(object):
 			subsequence 2 is y[5:12], subsequence 3 is y[12:30], ...				   
 		'''
 		assert y.ndim==2,"y must be a matrix"
-		
+
+		if self.block_size_range_frac_min and self.block_size_range_frac_max and self.output_size_mult:
+			idx = None
+			n = y.shape[0]
+			y = block_bootstrap(y, 
+								block_size_range = [int(self.block_size_range_frac_min*n), int(self.block_size_range_frac_max*n)], 
+								output_size = int(self.output_size_mult*n)
+								)
+
 		if idx is None:
 			idx=np.array([[0,y.shape[0]]],dtype=int)		 
 		
@@ -2264,11 +2316,22 @@ class GaussianHMM(object):
 		self.gibbs_A=self.gibbs_A[-self.n_gibbs:]
 		self.gibbs_P=self.gibbs_P[-self.n_gibbs:]
 		self.gibbs_mean=self.gibbs_mean[:,-self.n_gibbs:,:]
+
 		self.gibbs_cov=self.gibbs_cov[:,-self.n_gibbs:,:,:]
 
 		self.A=np.mean(self.gibbs_A,axis=0)
 		self.P=np.mean(self.gibbs_P,axis=0)
 		self.states_mean=np.mean(self.gibbs_mean,axis=1)
+		if self.check_sampling_distribution:
+			self.states_mean_min = np.min(self.gibbs_mean,axis=1)
+			self.states_mean_max = np.max(self.gibbs_mean,axis=1)
+			for i in range(self.states_mean.shape[0]):
+				for j in range(self.states_mean.shape[1]):
+					if self.states_mean[i,j]>0 and self.states_mean_min[i,j]<0:
+						self.states_mean[i,j] = 0
+					if self.states_mean[i,j]<0 and self.states_mean_max[i,j]>0:
+						self.states_mean[i,j] = 0						
+
 		self.states_cov=np.mean(self.gibbs_cov,axis=1)		
 
 		
@@ -2282,7 +2345,8 @@ class GaussianHMM(object):
 			self.states_cov_inv[i]=np.linalg.inv(self.states_cov[i])
 			self.states_cov_det[i]=np.linalg.det(self.states_cov[i])
 			self.w_norm=max(self.w_norm,np.sum(np.abs(np.dot(self.states_cov_inv[i],self.states_mean[i])))  )
-
+		if self.w_norm == 0:
+			self.w_norm = 1
 		# compute equilibrium distribution
 		n_iter_eq = 500
 		self.equilibrium_state = np.ones(self.A.shape[0], dtype = np.float64)
