@@ -288,7 +288,7 @@ def portfolio_post_process(paths:List[Dict[str,pd.DataFrame]],pct_fee=0.,seq_fee
 			path_w_sum.columns = keys_sample
 			# fill na with zero
 			path_s=path_s.fillna(0)
-			path_pw=path_pw.fillna(0)
+			path_pw=path_pw.fillna(method = 'ffill')
 			path_w_abs_sum=path_w_abs_sum.fillna(0)
 			path_w_sum = path_w_sum.fillna(0)
 

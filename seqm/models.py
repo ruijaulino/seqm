@@ -1904,6 +1904,13 @@ class GaussianHMM(object):
 		prob = np.zeros((n,self.n_states), dtype = np.float64) 
 		# probability of observations given state		
 		eff_prob = np.zeros((n,self.eff_n_states), dtype = np.float64) 
+
+		# compute non nan indexes
+		non_nan_indexes=[]        
+		if self.irregular_obs:
+			for i in range(self.p):
+				non_nan_indexes.append(~np.isnan(y[:,i]))   
+
 		for s in range(self.eff_n_states):
 			if self.independent_vars:
 				# emission variables are independent

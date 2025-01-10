@@ -199,18 +199,25 @@ def intraday_linear_model_select_search_base(
         return feature_start, feature_end, nested_sr, sr
     except:
         return -1, -1, -1, -1
-    
-def build_data(data:pd.DataFrame, add_prev_day:bool = True):
+
+
+def build_data(data:pd.DataFrame, add_prev_day:bool = True, valid_periods = None):
     assert len(data.columns) == 1, "data must have a single column with prices"
     data = data.copy(deep = True)
     data.columns = ['PX']
     # Add a column for date and time
     data['Date'] = data.index.date
-    data['Time'] = data.index.time
+    data['Time'] = data.index.strftime('%H:%M')
     # Pivot the dataframe to create a matrix where each row is a day, and columns are time intervals
     data.drop_duplicates(['Date','Time'], inplace = True)
     data = data.pivot(index='Date', columns='Time', values='PX')
     data.columns = [str(e) for e in data.columns] # make columns string
+    if valid_periods:
+        keep = []
+        for c in data.columns:
+            if c in valid_periods:
+                keep.append(c)
+        data = data[keep]
     if add_prev_day:
         data_shift = data.shift(1)
         data_shift.columns = [f'prev_{e}' for e in data_shift.columns]
@@ -236,11 +243,12 @@ def intraday_linear_model_select_search(
                         data:pd.DataFrame, 
                         valid_points_frac = 0.25, 
                         n_jobs = 20, 
+                        valid_periods = None,
                         filename = None
                         ):
     start_time = time.time()
     data = pd.DataFrame(data)
-    data = build_data(data)    
+    data = build_data(data, True, valid_periods)    
     # build tasks
     tasks = build_tasks(len(data.columns)-1, min_p = len(data.columns) // 2)
     # tasks = tasks[:50]
