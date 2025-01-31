@@ -20,7 +20,6 @@ except ImportError:
     
 
 
-
 class Workflow:
     def __init__(self, dataset:Dataset, model_pipe:ModelPipe):
         self.dataset = dataset

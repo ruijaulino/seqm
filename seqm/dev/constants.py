@@ -1,0 +1,11 @@
+STRATEGY_COLUMN = 'strategy'
+WEIGHT_PREFIX_COLUMNS = 'weight_'
+TARGET_PREFIX_COLUMNS = 'target_'
+PORTFOLIO_WEIGHT_COLUMN = 'portfolio_weight'
+DEFAULT_FREQ = 'D'
+DEFAULT_START_TS = '1950-01-01'
+TARGET_PREFIX = 'y' # target variable (returns)
+FEATURE_PREFIX = 'x' # continuous feature
+STATE_COL = 'z' # discrete state
+NON_TRADEABLE_TARGET_COL = 'r' # non tradeable target 
+MULTISEQ_IDX_COL = 'msidx'
