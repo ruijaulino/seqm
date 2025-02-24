@@ -2137,6 +2137,7 @@ class GaussianHMM(object):
 		self.gibbs_mean=np.zeros((self.eff_n_states,self.n_gibbs_sim,self.p)) # store sampled means
 		self.gibbs_A=np.zeros((self.n_gibbs_sim,self.n_states,self.n_states)) # store sampled transition matricess
 		self.gibbs_P=np.zeros((self.n_gibbs_sim,self.n_states))
+		self.gibbs_G = np.zeros(self.n_gibbs_sim)
 		
 		# initialize covariances and means
 		for s in range(self.eff_n_states):
@@ -2235,6 +2236,30 @@ class GaussianHMM(object):
 								q[idx[l][0]:idx[l][1]],
 								transition_counter,
 								init_state_counter)
+			# compute G for previous point!
+			# ------------------------
+			# tmp_s = np.zeros(n)
+			# for l in range(1, n):
+			# 	next_state_prob = np.dot(self.gibbs_A[i-1].T,forward_alpha[l-1])
+			# 	# group next state prob
+			# 	tmp_1 = np.zeros(self.eff_n_states)
+			# 	for i,e in enumerate(self.A_groups):
+			# 		tmp_1[i]=np.sum(next_state_prob[e])
+			# 	next_state_prob=tmp_1		
+			# 	# compute expected value		
+			# 	mu=np.sum(self.gibbs_mean[:,i-1,:]*next_state_prob[:,None],axis=0)
+			# 	# compute second central moment of the mixture distribution
+			# 	cov=np.zeros((self.p,self.p))
+			# 	for s in range(self.eff_n_states):
+			# 		cov+=(next_state_prob[s]*self.gibbs_cov[s,i-1])
+			# 		cov+=(next_state_prob[s]*self.gibbs_mean[s,i-1]*self.gibbs_mean[s,i-1][:,None])
+			# 	cov-=(mu*mu[:,None])
+			# 	w=np.dot(np.linalg.inv(cov),mu)
+			# 	tmp_s[l] = np.dot(w,y[l])
+
+			# self.gibbs_G[i-1] = np.mean(tmp_s) - 0.5*np.mean(np.power(tmp_s,2))
+			# ------------------------
+
 
 			# now, with a sample from the states (in q variable)
 			# it is all quite similar to a gaussian mixture!
