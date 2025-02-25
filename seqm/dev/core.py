@@ -138,7 +138,7 @@ class Array:
     def __getitem__(self, idx):
         ts_slice = self.ts[idx] if self.ts is not None else None
         # Return a view (using NumPy’s slicing, which is typically a view)
-        return Array(self.values[idx], self.cols, ts_slice)
+        return self.__class__(self.values[idx], self.cols, ts_slice)
 
     def __setitem__(self, idx, value):
         self.values[idx] = value
@@ -161,7 +161,7 @@ class Array:
             self.ts = np.concatenate((self.ts, array.ts))
 
 class MSIDX(Array):
-    def __init__(self, msidx: np.ndarray):
+    def __init__(self, msidx: np.ndarray, *args, **kwargs):
         super().__init__(np.array(msidx.ravel(), dtype=int), 'msidx')
         if self.p != 1:
             raise ValueError("MSIDX must be a 1D vector.")
@@ -189,7 +189,7 @@ class MSIDX(Array):
         self._compute_start()
 
 class TS(Array):
-    def __init__(self, ts: np.ndarray):
+    def __init__(self, ts: np.ndarray, *args, **kwargs):
         super().__init__(ts.ravel(), 'ts')
 
     @classmethod
@@ -243,7 +243,17 @@ class Data:
         return Data({k: v[idx] for k, v in self.arrays.items()})
 
     def __repr__(self):
-        return self.arrays.__repr__()
+        # create dataframe with the columns
+        # this is not supposed to be used many times
+        # so can be slower...
+        cols = []
+        values = []
+        for k, v in self.arrays.items():
+            cols += v.cols
+            values.append(np.atleast_2d(v.values.T).T)
+        values = np.hstack(values)
+        print(self.ts)
+        return pd.DataFrame(values, columns = cols, index = self.ts.as_datetime()).__repr__()
 
     def _checks(self):
         # Ensure all arrays have the same number of observations.
@@ -377,10 +387,69 @@ class Data:
         return self[start: idx + 1]
 
 
-
-class Dataset:
+# dict of Data with properties
+class Dataset(dict):
+    
     def __init__(self):
-        pass
+        self.folds_ts = None
+        # methods to behave like dict
+    
+    def add(self, key:str, item: Union[pd.DataFrame,Data]):
+        if isinstance(item, pd.DataFrame):
+            item = Data.from_df(item)
+        else:
+            if not isinstance(item, Data):            
+                raise TypeError("Item must be an instance of pd.DataFrame or Data")
+        self[key] = item
+
+    def split_ts(self, k_folds = 3):
+        # join all ts arrays, compute unique values
+        # and split array
+        ts = []
+        for k, data in self.items():
+            ts.append(data.ts.values)
+        ts = np.hstack(ts)
+        ts = np.unique(ts)
+        idx_folds = np.array_split(ts, k_folds)
+        self.folds_ts = [(fold[0], fold[-1]) for fold in idx_folds]
+        return self
+
+    def split(
+            self, 
+            test_fold_idx: int, 
+            burn_fraction: float = 0.1, 
+            min_burn_points: int = 1, 
+            seq_path: bool = False
+            ):
+        
+        if seq_path and test_fold_idx == 0:
+            raise ValueError("Cannot start at fold 0 when path is sequential")
+        if len(self.folds_ts) is None:
+            raise ValueError("Need to split before getting the split")
+        
+        train_dataset = Dataset()
+        test_dataset = Dataset()
+
+        for key, data in self.items():
+
+            ts_lower, ts_upper = self.folds_ts[test_fold_idx]            
+            
+            # create training data
+            train_data = data.before(ts = ts_lower)
+            train_data.random_segment(burn_fraction, min_burn_points)            
+            # if path is non sequential add data after the test set
+            if not seq_path:
+                train_data_add = data.after(ts = ts_upper)
+                train_data_add.random_segment(burn_fraction, min_burn_points)
+                train_data.stack(train_data_add, allow_both_empty = True)
+            
+            # get test data
+            test_data = data.between(ts_lower, ts_upper)
+            
+            train_dataset.add(key, train_data)
+            test_dataset.add(key, test_data)    
+
+        return train_dataset, test_dataset
 
 
 # ----------------------------------------------
@@ -485,8 +554,42 @@ def cvbt_path(
 
 
 
+def linear(n=1000,a=0,b=0.1,start_date='2000-01-01'):
+    x=np.random.normal(0,0.01,n)
+    y=a+b*x+np.random.normal(0,0.01,n)
+    dates=pd.date_range(start_date,periods=n,freq='D')
+    data=pd.DataFrame(np.hstack((y[:,None],x[:,None])),columns=['y1','x1'],index=dates)
+    return data
 
 
+def test_data():
+    df = linear(n=1000,a=0,b=0.1,start_date='2000-01-01')
+    data = Data.from_df(df)
+    df1 = linear(n=10,a=0,b=0.1,start_date='2000-01-01')
+    data1 = Data.from_df(df1)
+    df2 = linear(n=10,a=0,b=0.1,start_date='2000-01-01')
+    data2 = Data.from_df(df2)
+    data1.stack(data2)
+    print(data1)        
+    print(data1.as_dict())
+    print('----------')
+    print(data1.model_input(2))
+
+
+def test_dataset():
+    df1 = linear(n=10,a=0,b=0.1,start_date='2000-01-01')
+    df2 = linear(n=10,a=0,b=0.1,start_date='2000-01-01')
+
+    dataset = Dataset()
+    dataset.add('a', df1)
+    dataset.add('b', df2)
+    dataset.split_ts(2)
+    train, test = dataset.split(0)
+    print(dataset)
+    print('=======================')
+    print(train)
+    print('=======================')
+    print(test)
 
 if __name__ == '__main__':
-    pass
+    test_dataset()
