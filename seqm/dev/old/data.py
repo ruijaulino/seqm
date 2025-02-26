@@ -1,358 +1,328 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from abc import ABC, abstractmethod
 from typing import List, Union, Dict
 import copy
 import tqdm
-try:
-    from .generators import *
-    from .constants import *
-    from .model_pipe import ModelPipe
-except ImportError:
-    from generators import *
-    from constants import *
-    from model_pipe import ModelPipe
-    
-def add_unix_timestamp(df:pd.DataFrame):
-    # create a column with unix timestamp
-    # add dates are dealt as integers
-    if 'ts' not in df.columns: df['ts'] = df.index.view(np.int64) // 10 ** 9
-    return df
 
-def unix_timestamp_to_index(df:pd.DataFrame):
-    if 'ts' in df.columns: df.index = pd.to_datetime( data['ts'] * 10 ** 9 )
-    return df
+# -----------------------
+# Constants & Configurations
+# -----------------------
+TARGET_PREFIX = 'y'               # Target variable (returns)
+FEATURE_PREFIX = 'x'              # Continuous feature
+STATE_COL = 'z'                   # Discrete state
+NON_TRADEABLE_TARGET_COL = 't'    # Non-tradeable target
+MULTISEQ_IDX_COL = 'msidx'
+STRATEGY_COL = 'strategy'
+PORTFOLIO_WEIGHT_COL = 'pw'
+WEIGHT_PREFIX = 'weight'
 
-def get_df_cols(df):
-    cols = df.columns.tolist()
-    x_cols = [c for c in cols if c.startswith(FEATURE_PREFIX)]      
-    y_cols = [c for c in cols if c.startswith(TARGET_PREFIX)]
-    t_cols = [c for c in cols if c.startswith(NON_TRADEABLE_TARGET_COL)]
-    return x_cols, t_cols, y_cols
 
-def check_empty_list(l):
-    if len(l) == 0:
-        return None
-    else:
-        return l
-
-# wrapper over a dict to allow keys to be accessed like a method
-class DictWrapper:
-    def __init__(self, data=None):
-        self._data = data if data is not None else {}
-
-    def __getattr__(self, key):
-        try:
-            return self._data[key]
-        except KeyError:
-            raise AttributeError(f"'DictWrapper' object has no attribute '{key}'")
-
-    def __setattr__(self, key, value):
-        if key == "_data":
-            super().__setattr__(key, value)
-        else:
-            self._data[key] = value
-
-    def __iter__(self):
-        """Allows iteration over keys in the dictionary."""
-        return iter(self._data)
-
-    def keys(self):
-        """Returns the keys of the dictionary."""
-        return self._data.keys()
-
-    def __repr__(self):
-        return repr(self._data)
-    
-    def method(self):
-        print('ola ', self.name)
-        for k in self:
-            print('ole: ', k)
-
-# base container for an array
+# -----------------------
+# Array and Derived Classes
+# Numpy array wrapper
+# by default, does not make any copies!
+# -----------------------
 class Array:
-    def __init__(self, arr:np.ndarray, cols):
-        self.arr = np.copy(arr)
-        self.cols = cols if isinstance(cols, list) else [cols]
-        self.p = 1
-        if self.arr.ndim == 2:
-            self.n, self.p = self.arr.shape
+    def __init__(self, values: np.ndarray, cols: Union[str, List[str]], ts: np.ndarray = None):
+        # No extra copying is performed here – similar to NumPy’s behavior.
+        self.values = values
+        self.cols = [cols] if isinstance(cols, str) else cols
+        self.ts = ts
+        self._update_shape()
+
+    def _update_shape(self):
+        if self.values.ndim == 1:
+            self.n = self.values.size
+            self.p = 1
         else:
-            self.n = self.arr.size
-        assert len(cols) == self.p, "arr and cols must have the same number of variables"
-    
+            self.n, self.p = self.values.shape
+        if len(self.cols) != self.p:
+            raise ValueError("Number of columns does not match the data shape.")
+        if self.ts is not None:
+            if self.ts.ndim != 1 or self.ts.size != self.n:
+                raise ValueError("Timestamp array must be 1D and match the number of observations.")
+
+    def set_values(self, values: np.ndarray):
+        self.values = values
+        self._update_shape()
+
+    def __array__(self):
+        return self.values
+
+    def shape(self):
+        return self.values.shape
+
     @property
     def empty(self):
         return self.n == 0
 
-    def at(self, idx:np.ndarray):
-        # filter array on indexes
-        assert idx.ndim == 1, "idx must be a vector"
-        return Array(self.arr[idx], self.cols)
+    def __getitem__(self, idx):
+        ts_slice = self.ts[idx] if self.ts is not None else None
+        # Return a view (using NumPy’s slicing, which is typically a view)
+        return Array(self.values[idx], self.cols, ts_slice)
 
-
-# time index, derived from Array
-class TS(Array):
-    def __init__(self, ts):
-        super().__init__(ts, 'ts')  # Call the parent constructor
-
-    def before(self):
-        pass
-
-    def after(self):
-        pass
-
-    def between(self):
-        pass
-
-# multiseq indexes, derived from Array
-class MSIDX(Array):
-    def __init__(self, msidx):
-        super().__init__(msidx, 'msidx')  # Call the parent constructor
-
-    def before(self):
-        pass
-
-    def after(self):
-        pass
-
-    def between(self):
-        pass        
-
-
-
-
-class Data:
-    def __init__(self, data = None):
-        self._data = data if data is not None else {}
-
-    def __getattr__(self, key):
-        try:
-            return self._data.get(key, None)
-        except KeyError:
-            raise AttributeError(f"'DictWrapper' object has no attribute '{key}'")
-
-    def __setattr__(self, key, value):
-        if key == "_data":
-            super().__setattr__(key, value)
-        else:
-            if isinstance(value, np.ndarray):
-                # always make copies of arrays
-                self._data[key] = np.copy(value)
-            else:
-                self._data[key] = value
-        # run checks to make sure the data makes sense
-        self._checks()
-
-    def __iter__(self):
-        """Allows iteration over keys in the dictionary."""
-        return iter(self._data)
-
-    def keys(self):
-        """Returns the keys of the dictionary."""
-        return self._data.keys()
-
-    def values(self):
-        """Return all values stored in the object."""
-        return self._data.values()
+    def __setitem__(self, idx, value):
+        self.values[idx] = value
 
     def __repr__(self):
-        return repr(self._data)
-    
-    def _checks(self):
-        print('in _checks')
-        # ts needs to be defined
-        assert self.ts, "ts needs to be defined"
-        assert self.y, "y needs to be defined"                
-        # check number of observations
-        shapes = [
-            v.size if v.ndim == 1 else v.shape[0]
-            for v in self.values() if isinstance(v, np.ndarray)
-        ]
-        assert len(set(shapes)) == 1 if shapes else True, "arrays must have the same number of observations"
-    
-    @property
-    def empty(self):
-        return len(self._data) == 0 or all(v.shape[0] == 0 for v in self.values() if isinstance(v, np.ndarray))
+        index = self.ts if self.ts is not None else None
+        return pd.DataFrame(self.values, columns=self.cols, index=index).__repr__()
 
-    def view(self):
-        print('** Data **')
-        
-        print(pd.DataFrame(self.data, columns = self.cols, index = self.get_ts_as_timestamp()))
-        print('**********')
-        print()
-
-    @classmethod
-    def from_df(cls, df: pd.DataFrame):    
-        pass
-
-
-    def method(self):
-        print('ola ', self.name)
-        for k in self:
-            print('ole: ', k)
-
-
-
-
-# Data structure
-class Data:
-    def __init__(self, arrays:Array):
-        # add unix timestamp
-        # self.empty = True if y is None else False        
-        self.arrays = copy.deepcopy(arrays)
-        assert self.arrays.ts.ndim == 1, "ts must be a vector"
-        assert self.data.ndim == 2, "data must be a matrix"
-        assert self.ts.size == self.data.shape[0], "ts and data must have the same number of observations"
-        assert len(self.cols) == self.data.shape[1], "cols and data must have the same number of variables"                
-        self.fix_msidx()
-
-    @property
-    def empty(self):
-        return len(self.data) == 0 or all(value.shape[0] == 0 for value in self.data.values())
-    
-    def fix_msidx(self):
-        # idx need to be an array like 000,1111,2222,33,444
-        # but can be something like 111,000,11,00000,1111,22
-        # i.e, the indexes of the sequence need to be in order for the
-        # cvbt to work. Fix the array in case this is not verified
-        # this is a bit of overhead but has to be this way
-        msidx = np.zeros(self.data.get('msidx').size,dtype=int)
-        aux = self.data.get('msidx')[1:] - self.data.get('msidx')[:-1]
-        msidx[np.where(aux!=0)[0]+1] = 1
-        self.data['msidx'] = np.cumsum(msidx)
-
-    def converted_msidx(self):
-        '''
-        idx: numpy (n,) array like 0,0,0,1,1,1,1,2,2,2,3,3,3,4,4,...
-            with the indication where the subsequences are
-            creates an array like
-            [
-            [0,3],
-            [3,7],
-            ...
-            ]
-            with the indexes where the subsequences start and end
-        '''
-        aux=self.idx[1:]-self.idx[:-1]
-        aux=np.where(aux!=0)[0]
-        aux+=1
-        aux_left=np.hstack(([0],aux))
-        aux_right=np.hstack((aux,[self.idx.size]))
-        out=np.hstack((aux_left[:,None],aux_right[:,None]))
-        return out
-
-    def get_ts_as_timestamp(self):
-        return pd.to_datetime( self.ts * 10 ** 9 )
-
-    def view(self):
-        print('** Data **')
-        print(pd.DataFrame(self.data, columns = self.cols, index = self.get_ts_as_timestamp()))
-        print('**********')
-        print()
-
-    @classmethod
-    def from_df(cls, df: pd.DataFrame, safe_arrays = True):
-        # parse the dataframe into the inputs
-        df = df.copy(deep = True)
-        # add unix timestamp
-        df = add_unix_timestamp(df)        
-        ts = df['ts'].values
-        data = df.values
-        cols = list(df.columns)
-        return cls(ts = ts, data = data, cols = cols)
-
-    def _from_idx(self, idx:np.ndarray, create_new = False):        
-        ts_ = self.ts[idx]
-        data_ = self.data[idx]                
-        if create_new:
-            return Data(ts = ts_, data = data_, cols = self.cols)
+    def stack(self, array: 'Array'):
+        if self.cols != array.cols:
+            raise ValueError("Cannot stack arrays with different columns.")
+        # For multivariate arrays, stack vertically; for univariate, stack horizontally.
+        if self.values.ndim == 1:            
+            self.values = np.hstack((self.values, array.values))
+            self.n = self.values.size
         else:
-            # I think this is never used.. (I think we need to fix the msidx here as well)
-            self.ts = ts_
-            self.data = data
-            return self     
+            self.values = np.vstack((self.values, array.values))
+            self.n = self.values.shape[0]
+        if self.ts is not None and array.ts is not None:
+            self.ts = np.concatenate((self.ts, array.ts))
+
+class MSIDX(Array):
+    def __init__(self, msidx: np.ndarray):
+        super().__init__(np.array(msidx.ravel(), dtype=int), 'msidx')
+        if self.p != 1:
+            raise ValueError("MSIDX must be a 1D vector.")
+        # Compute differences to mark subsequence boundaries.
+        diff = np.diff(self.values, prepend=self.values[0])
+        change = (diff != 0).astype(int)
+        self.values = np.cumsum(change)
+        self._compute_start()
+
+    def _compute_start(self):
+        mask = np.r_[True, self.values[1:] != self.values[:-1]]
+        self.start = np.where(mask)[0]
+
+    def _compute_idx_limits(self):
+        change_idx = np.where(np.diff(self.values) != 0)[0] + 1
+        start_indices = np.hstack(([0], change_idx))
+        end_indices = np.hstack((change_idx, [self.n]))
+        self.idx_limits = np.column_stack((start_indices, end_indices))
+
+    def stack(self, array: 'MSIDX'):
+        offset = self.values[-1] - array.values[0] + 1
+        adjusted_values = array.values + offset
+        self.values = np.hstack((self.values, adjusted_values))
+        self.n = self.values.size
+        self._compute_start()
+
+class TS(Array):
+    def __init__(self, ts: np.ndarray):
+        super().__init__(ts.ravel(), 'ts')
+
+    @classmethod
+    def from_index(cls, index: pd.DatetimeIndex):
+        # Convert DatetimeIndex to Unix timestamps.
+        ts = index.view(np.int64) // 10 ** 9
+        return cls(ts)
+
+    def as_datetime(self):
+        return pd.to_datetime(self.values * 10 ** 9)
+
+    def __lt__(self, value):
+        return self.values < value
+
+    def __gt__(self, value):
+        return self.values > value
+
+    def __le__(self, value):
+        return self.values <= value
+
+    def __ge__(self, value):
+        return self.values >= value
+
+class State(Array):
+    def __init__(self, z: np.ndarray, name: str = STATE_COL):
+        super().__init__(np.array(z.ravel(), dtype=int), name)
+
+# -----------------------
+# Data Container Class
+# behaves like a dict of Arrays
+# -----------------------
+class Data:
+    def __init__(self, arrays: Dict[str, Array]):
+        self.arrays = arrays
+        if 'ts' not in self.arrays or 'y' not in self.arrays:
+            raise ValueError("Data must contain at least 'ts' and 'y' arrays.")
+        self._checks()
+
+    @property
+    def n(self):
+        return self.arrays['ts'].n
+
+    @property
+    def p(self):
+        return self.arrays['y'].p
+
+    def __getitem__(self, idx):
+        # Support tuple indexing: if a tuple is provided, use its first element for row slicing.
+        if isinstance(idx, tuple):
+            idx = idx[0]
+        return Data({k: v[idx] for k, v in self.arrays.items()})
+
+    def __repr__(self):
+        return self.arrays.__repr__()
+
+    def _checks(self):
+        # Ensure all arrays have the same number of observations.
+        n_obs = self.n
+        for arr in self.arrays.values():
+            if arr.n != n_obs:
+                raise ValueError("All arrays must have the same number of observations.")
+        # delete this later....
+        # Create default strategy and weight arrays if missing.
+        if STRATEGY_COL not in self.arrays:
+            self.arrays[STRATEGY_COL] = Array(np.zeros(n_obs), STRATEGY_COL)
+        if 'w' not in self.arrays:
+            weight_cols = [f"{WEIGHT_PREFIX}_{col}" for col in self.arrays['y'].cols]
+            self.arrays['w'] = Array(np.zeros((n_obs, self.p)), weight_cols)
+
+    def copy(self):
+        """
+        Return a deep copy of the Data instance.
+        Use this method when you need an independent copy of the data.
+        """
+        return Data(copy.deepcopy(self.arrays))
+
+    @classmethod
+    def from_df(cls, df: pd.DataFrame):
+        arrays = {'ts': TS.from_index(df.index)}
+        # Target variable(s)
+        y_cols = [c for c in df.columns if c.startswith(TARGET_PREFIX)]
+        if y_cols:
+            arrays['y'] = Array(df[y_cols].values, y_cols)
+        else:
+            raise ValueError("No target columns found (prefix 'y').")
+        # Feature variable(s)
+        x_cols = [c for c in df.columns if c.startswith(FEATURE_PREFIX)]
+        if x_cols:
+            arrays['x'] = Array(df[x_cols].values, x_cols)
+        # Non-tradeable targets
+        t_cols = [c for c in df.columns if c.startswith(NON_TRADEABLE_TARGET_COL)]
+        if t_cols:
+            arrays['t'] = Array(df[t_cols].values, t_cols)
+        # State variable
+        if STATE_COL in df.columns:
+            arrays[STATE_COL] = State(df[STATE_COL].values, STATE_COL)
+        # Multi-sequence index
+        if MULTISEQ_IDX_COL in df.columns:
+            arrays[MULTISEQ_IDX_COL] = MSIDX(df[MULTISEQ_IDX_COL].values)
+        else:
+            arrays[MULTISEQ_IDX_COL] = MSIDX(np.zeros(len(df), dtype=int))
+        return cls(arrays)
+
+    def __getattr__(self, name):
+        if name in self.arrays:
+            return self.arrays[name]
+        raise AttributeError(f"'Data' object has no attribute '{name}'")
+
+    def __setattr__(self, name, value):
+        if name == 'arrays':
+            super().__setattr__(name, value)
+        elif isinstance(value, Array):
+            self.arrays[name] = value
+            self._checks()
+        elif isinstance(value, np.ndarray):
+            if name in self.arrays:
+                self.arrays[name].set_values(value)
+                self._checks()
+            else:
+                raise ValueError(f"Array {name} must be created first.")
+        else:
+            super().__setattr__(name, value)
+
+    def after(self, ts: int):
+        if self.n == 0:
+            return self
+        return self[self.ts > ts]
+
+    def before(self, ts: int):
+        if self.n == 0:
+            return self
+        return self[self.ts < ts]
+
+    def between(self, ts_lower: int, ts_upper: int):
+        if self.n == 0:
+            return self
+        condition = (self.ts.values >= ts_lower) & (self.ts.values <= ts_upper)
+        return self[condition]
 
     @staticmethod
-    def _random_subsequence(ar, burn_fraction, min_burn_points):
-        a, b = np.random.randint(max(min_burn_points, 1), max(int(ar.size * burn_fraction), min_burn_points + 1), size=2)
-        return ar[a:-b]
+    def _random_subsequence(arr: np.ndarray, burn_fraction: float, min_burn_points: int):
+        start = np.random.randint(max(min_burn_points, 1), max(int(arr.size * burn_fraction), min_burn_points + 1))
+        end = np.random.randint(max(min_burn_points, 1), max(int(arr.size * burn_fraction), min_burn_points + 1))
+        return arr[start:-end]
 
-    def random_segment(self, burn_fraction, min_burn_points, create_new = False):
-        '''
-        '''
-        if self.empty: return self
-        idx = np.arange(self.y.shape[0])
-        idx = self._random_subsequence(idx, burn_fraction, min_burn_points)     
-        return self._from_idx(idx, create_new)
+    def random_segment(self, burn_fraction: float, min_burn_points: int):
+        if self.n == 0:
+            return self
+        idx = np.arange(self.n)
+        idx_segment = self._random_subsequence(idx, burn_fraction, min_burn_points)
+        return self[idx_segment]
 
-    def after(self, ts:int, create_new = True):
-        if self.empty: return self
-        idx = np.where(self.ts > ts)[0]
-        return self._from_idx(idx, create_new)
-
-    def before(self, ts:int, create_new = True):
-        if self.empty: return self
-        idx = np.where(self.ts < ts)[0]
-        return self._from_idx(idx, create_new)
-
-    def between(self,ts_lower, ts_upper, create_new = True):
-        if self.empty: return self
-        idx = np.where( (self.ts<=ts_upper) & (self.ts>=ts_lower) )[0]
-        return self._from_idx(idx, create_new)
-
-    def _copy(self, data:'Data'):
-        self.ts = data.ts
-        self.data = data.data
-
-    def stack(self, data:'Data', allow_both_empty:bool = False):
-        # make sure both are not empty
-        if self.empty and data.empty:
-            if allow_both_empty:        
+    def stack(self, data: 'Data', allow_both_empty: bool = False):
+        if self.n == 0 and data.n == 0:
+            if allow_both_empty:
                 return self
-            else:
-                raise Exception('both Data are empty. Cannot stack.')
-        if self.empty and not data.empty:
-            self._copy(data)
+            raise ValueError("Both Data objects are empty. Cannot stack.")
+        if self.n == 0:
+            self.arrays = data.arrays
             return self
-        if not self.empty and data.empty:
+        if data.n == 0:
             return self
-        # check if columns match
-        assert self.cols == data.cols,"cols are different"
-        
-        # must fix msidx from data
+        if set(self.arrays.keys()) != set(data.arrays.keys()):
+            raise ValueError("Data objects have different fields and cannot be stacked.")
+        for key, arr in self.arrays.items():
+            arr.stack(data.arrays[key])
+        return self
 
+    def as_dict(self):
+        return {k: v.values for k, v in self.arrays.items()}
 
-        self.data = np.vstack((self.data, data.data))
-        self.ts = np.hstack((self.ts, data.ts))
-        self.idx = np.hstack((self.idx,data.idx+self.idx[-1]-data.idx[0]+1))
-        return self     
-
-
-    def build_train_inputs(self):
-        '''
-        build train inputs for models       
-        '''
-        return {'x' : self.x, 'y' : self.y, 'z' : self.z, 'oos_s':self.oos_s, 'idx':self.converted_msidx(), 't': self.t} 
+    def model_input(self, idx: int = None):
+        """
+        Return the most recent subsequence for model input.
+        If idx is None, use the last observation.
+        Note: This uses the new tuple-indexing feature so you can write:
+              return self[start, idx+1]
+        """
+        if idx is None:
+            idx = self.n - 1
+        if not hasattr(self.msidx, 'start'):
+            raise ValueError("msidx does not have computed start indices.")
+        valid_starts = self.msidx.start[self.msidx.start <= idx]
+        start = valid_starts[-1] if valid_starts.size > 0 else 0
+        return self[start: idx + 1]
 
 
 if __name__ == '__main__':
-    
-    df = linear(n=10,a=0,b=0.1,start_date='2000-01-01')
-    print(df)
-    print(sdfsd)
+
+    def linear(n=1000,a=0,b=0.1,start_date='2000-01-01'):
+        x=np.random.normal(0,0.01,n)
+        y=a+b*x+np.random.normal(0,0.01,n)
+        dates=pd.date_range(start_date,periods=n,freq='D')
+        data=pd.DataFrame(np.hstack((y[:,None],x[:,None])),columns=['y1','x1'],index=dates)
+        return data
+
+    df = linear(n=1000,a=0,b=0.1,start_date='2000-01-01')
+
     data = Data.from_df(df)
-    
-    ts = 947289600 # 947462400
-    data.view()
 
-    data.before(ts).view()
+    df1 = linear(n=10,a=0,b=0.1,start_date='2000-01-01')
+    data1 = Data.from_df(df1)
+    df2 = linear(n=10,a=0,b=0.1,start_date='2000-01-01')
+    data2 = Data.from_df(df2)
+    data1.stack(data2)
+    print(data1)        
+    print(data1.as_dict())
+    print('----------')
+    print(data1.model_input(2))
 
-    tmp=data.after(947462400)# 
-    print(tmp.y)
-    print(tmp.empty)
-    tmp.view()
 
-    # data.view()
-    # data.random_segment(0.1,3)
-    # data.view()
+
+

@@ -6,6 +6,9 @@ from typing import List, Union, Dict
 import copy
 import tqdm
 
+
+# DATA CLASSES
+
 # -----------------------
 # Constants & Configurations
 # -----------------------
@@ -14,9 +17,9 @@ FEATURE_PREFIX = 'x'              # Continuous feature
 STATE_COL = 'z'                   # Discrete state
 NON_TRADEABLE_TARGET_COL = 't'    # Non-tradeable target
 MULTISEQ_IDX_COL = 'msidx'
-STRATEGY_COL = 'strategy'
+STRATEGY_COL = 's'
 PORTFOLIO_WEIGHT_COL = 'pw'
-WEIGHT_PREFIX = 'weight'
+WEIGHT_PREFIX = 'w'
 
 
 # -----------------------
@@ -58,10 +61,13 @@ class Array:
     def empty(self):
         return self.n == 0
 
+    def at(self, idx):
+        return self.values[idx]
+
     def __getitem__(self, idx):
         ts_slice = self.ts[idx] if self.ts is not None else None
         # Return a view (using NumPy’s slicing, which is typically a view)
-        return Array(self.values[idx], self.cols, ts_slice)
+        return self.__class__(self.values[idx], self.cols, ts_slice)
 
     def __setitem__(self, idx, value):
         self.values[idx] = value
@@ -84,20 +90,23 @@ class Array:
             self.ts = np.concatenate((self.ts, array.ts))
 
 class MSIDX(Array):
-    def __init__(self, msidx: np.ndarray):
+    def __init__(self, msidx: np.ndarray, *args, **kwargs):
         super().__init__(np.array(msidx.ravel(), dtype=int), 'msidx')
         if self.p != 1:
             raise ValueError("MSIDX must be a 1D vector.")
-        # Compute differences to mark subsequence boundaries.
-        diff = np.diff(self.values, prepend=self.values[0])
-        change = (diff != 0).astype(int)
-        self.values = np.cumsum(change)
-        self._compute_start()
+        # Compute differences to mark subsequence boundaries.          
+        if not self.empty:
+            diff = np.diff(self.values, prepend=self.values[0])
+            change = (diff != 0).astype(int)
+            self.values = np.cumsum(change)
+            self._compute_start()
 
     def _compute_start(self):
-        mask = np.r_[True, self.values[1:] != self.values[:-1]]
-        self.start = np.where(mask)[0]
+        if not self.empty:
+            mask = np.r_[True, self.values[1:] != self.values[:-1]]
+            self.start = np.where(mask)[0]
 
+    # CHECK WHAT THIS FOR..
     def _compute_idx_limits(self):
         change_idx = np.where(np.diff(self.values) != 0)[0] + 1
         start_indices = np.hstack(([0], change_idx))
@@ -105,14 +114,17 @@ class MSIDX(Array):
         self.idx_limits = np.column_stack((start_indices, end_indices))
 
     def stack(self, array: 'MSIDX'):
-        offset = self.values[-1] - array.values[0] + 1
+        if self.empty:
+            offset = 0
+        else:    
+            offset = self.values[-1] - array.values[0] + 1
         adjusted_values = array.values + offset
         self.values = np.hstack((self.values, adjusted_values))
         self.n = self.values.size
         self._compute_start()
 
 class TS(Array):
-    def __init__(self, ts: np.ndarray):
+    def __init__(self, ts: np.ndarray, *args, **kwargs):
         super().__init__(ts.ravel(), 'ts')
 
     @classmethod
@@ -166,7 +178,16 @@ class Data:
         return Data({k: v[idx] for k, v in self.arrays.items()})
 
     def __repr__(self):
-        return self.arrays.__repr__()
+        # create dataframe with the columns
+        # this is not supposed to be used many times
+        # so can be slower...
+        cols = []
+        values = []
+        for k, v in self.arrays.items():
+            cols += v.cols
+            values.append(np.atleast_2d(v.values.T).T)
+        values = np.hstack(values)
+        return pd.DataFrame(values, columns = cols, index = self.ts.as_datetime()).__repr__()
 
     def _checks(self):
         # Ensure all arrays have the same number of observations.
@@ -239,18 +260,26 @@ class Data:
     def after(self, ts: int):
         if self.n == 0:
             return self
-        return self[self.ts > ts]
+        condition = np.where(self.ts > ts)[0]
+        if condition.size:
+            return self[condition[0]:] # we can use simple indexing here
+        else:
+            return self[:0]
 
     def before(self, ts: int):
         if self.n == 0:
             return self
-        return self[self.ts < ts]
+        condition = np.where(self.ts < ts)[0]
+        if condition.size:
+            return self[:condition[-1]+1] # we can use simple indexing here
+        else:
+            return self[:0]
 
     def between(self, ts_lower: int, ts_upper: int):
         if self.n == 0:
             return self
-        condition = (self.ts.values >= ts_lower) & (self.ts.values <= ts_upper)
-        return self[condition]
+        condition = np.where((self.ts >= ts_lower) & (self.ts <= ts_upper))[0]
+        return self[condition[0]:condition[-1]+1] # we can use simple indexing here
 
     @staticmethod
     def _random_subsequence(arr: np.ndarray, burn_fraction: float, min_burn_points: int):
@@ -261,9 +290,12 @@ class Data:
     def random_segment(self, burn_fraction: float, min_burn_points: int):
         if self.n == 0:
             return self
-        idx = np.arange(self.n)
-        idx_segment = self._random_subsequence(idx, burn_fraction, min_burn_points)
-        return self[idx_segment]
+        start = np.random.randint(max(min_burn_points, 1), max(int(self.n * burn_fraction), min_burn_points + 1))
+        end = np.random.randint(max(min_burn_points, 1), max(int(self.n * burn_fraction), min_burn_points + 1))
+        # idx = np.arange(self.n)        
+        #idx_segment = self._random_subsequence(idx, burn_fraction, min_burn_points)
+        #return self[idx_segment]
+        return self[slice(start, self.n - end)]
 
     def stack(self, data: 'Data', allow_both_empty: bool = False):
         if self.n == 0 and data.n == 0:
@@ -282,11 +314,12 @@ class Data:
         return self
 
     def as_dict(self):
+        #  
         return {k: v.values for k, v in self.arrays.items()}
 
-    def model_input(self, idx: int = None):
+    def at(self, idx: int = None):
         """
-        Return the most recent subsequence for model input.
+        Return the most recent subsequence at index idx
         If idx is None, use the last observation.
         Note: This uses the new tuple-indexing feature so you can write:
               return self[start, idx+1]
@@ -300,19 +333,80 @@ class Data:
         return self[start: idx + 1]
 
 
-if __name__ == '__main__':
+# dict of Data with properties
+class Dataset(dict):
+    
+    def __init__(self):
+        self.folds_ts = None
+        # methods to behave like dict
+    
+    def add(self, key:str, item: Union[pd.DataFrame,Data]):
+        if isinstance(item, pd.DataFrame):
+            item = Data.from_df(item)
+        else:
+            if not isinstance(item, Data):            
+                raise TypeError("Item must be an instance of pd.DataFrame or Data")
+        self[key] = item
 
-    def linear(n=1000,a=0,b=0.1,start_date='2000-01-01'):
-        x=np.random.normal(0,0.01,n)
-        y=a+b*x+np.random.normal(0,0.01,n)
-        dates=pd.date_range(start_date,periods=n,freq='D')
-        data=pd.DataFrame(np.hstack((y[:,None],x[:,None])),columns=['y1','x1'],index=dates)
-        return data
+    def split_ts(self, k_folds = 3):
+        # join all ts arrays, compute unique values
+        # and split array
+        ts = []
+        for k, data in self.items():
+            ts.append(data.ts.values)
+        ts = np.hstack(ts)
+        ts = np.unique(ts)
+        idx_folds = np.array_split(ts, k_folds)
+        self.folds_ts = [(fold[0], fold[-1]) for fold in idx_folds]
+        return self
 
+    def split(
+            self, 
+            test_fold_idx: int, 
+            burn_fraction: float = 0.1, 
+            min_burn_points: int = 1, 
+            seq_path: bool = False
+            ):
+        
+        if seq_path and test_fold_idx == 0:
+            raise ValueError("Cannot start at fold 0 when path is sequential")
+        if len(self.folds_ts) is None:
+            raise ValueError("Need to split before getting the split")
+        
+        train_dataset = Dataset()
+        test_dataset = Dataset()
+
+        for key, data in self.items():
+
+            ts_lower, ts_upper = self.folds_ts[test_fold_idx]            
+            
+            # get test data
+            test_data = data.between(ts_lower, ts_upper)
+
+            # create training data
+            train_data = data.before(ts = ts_lower).random_segment(burn_fraction, min_burn_points)
+            # if path is non sequential add data after the test set
+            if not seq_path:
+                train_data_add = data.after(ts = ts_upper).random_segment(burn_fraction, min_burn_points)
+                train_data.stack(train_data_add, allow_both_empty = True)
+                        
+            train_dataset.add(key, train_data)
+            test_dataset.add(key, test_data)    
+
+        return train_dataset, test_dataset
+
+
+def linear(n=1000,a=0,b=0.1,start_date='2000-01-01'):
+    x=np.random.normal(0,0.01,n)
+    y=a+b*x+np.random.normal(0,0.01,n)
+    dates=pd.date_range(start_date,periods=n,freq='D')
+    data=pd.DataFrame(np.hstack((y[:,None],x[:,None])),columns=['y1','x1'],index=dates)
+    return data
+
+
+def test_data():
     df = linear(n=1000,a=0,b=0.1,start_date='2000-01-01')
-
     data = Data.from_df(df)
-
     df1 = linear(n=10,a=0,b=0.1,start_date='2000-01-01')
     data1 = Data.from_df(df1)
     df2 = linear(n=10,a=0,b=0.1,start_date='2000-01-01')
@@ -324,5 +418,21 @@ if __name__ == '__main__':
     print(data1.model_input(2))
 
 
+def test_dataset():
 
+    df1 = linear(n=20,a=0,b=0.1,start_date='2000-01-01')
+    df2 = linear(n=20,a=0,b=0.1,start_date='2000-01-01')
 
+    dataset = Dataset()
+    dataset.add('a', df1)
+    dataset.add('b', df2)
+    print(dataset)
+    print('=======================')
+    dataset.split_ts(2)
+    train, test = dataset.split(0, burn_fraction = 0.4, min_burn_points = 1)
+    print(test)
+    print('=======================')
+    print(train)
+
+if __name__ == '__main__':
+    test_dataset()
